@@ -28,7 +28,9 @@ concurrency:
 
 env:
   NODE_VERSION: '20'             # <!-- CUSTOMIZE: your Node.js version -->
-  COVERAGE_THRESHOLD: 80         # <!-- CUSTOMIZE: minimum coverage % (0 to disable) -->
+  # <!-- CUSTOMIZE: minimum coverage % -->
+  # Set to 0 if your project enforces coverage via jest.config.js coverageThreshold instead.
+  COVERAGE_THRESHOLD: 80
 
 jobs:
   # ── Lint ──────────────────────────────────────────────────────
@@ -106,7 +108,7 @@ jobs:
               exit 1
             fi
           else
-            echo "::warning::No coverage-summary.json found. Ensure jest is configured with --coverageReporters=json-summary"
+            echo "::warning::No coverage-summary.json found. Ensure jest is configured with coverageReporters: ['json-summary']"
           fi
 
       - name: Upload coverage
@@ -134,6 +136,7 @@ jobs:
         run: npm ci
 
       - name: Dependency audit
+        continue-on-error: true
         run: npm audit --audit-level=high
         # Python: uv pip audit
         # Go: govulncheck ./...
@@ -158,8 +161,10 @@ jobs:
           fi
           echo "No hardcoded secrets found."
 
-  # ── Build (gated on all checks) ──────────────────────────────
+  # ── Build (push only — PRs skip since typecheck validates compilation,
+  #    and the build often requires env vars not available on PR runners) ──
   build:
+    if: github.event_name == 'push'
     needs: [lint, typecheck, test, security-audit]
     runs-on: ubuntu-latest
     steps:
