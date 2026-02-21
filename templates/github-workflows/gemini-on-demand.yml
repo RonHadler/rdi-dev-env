@@ -21,6 +21,9 @@ permissions:
   pull-requests: write
   issues: write
 
+env:
+  MAX_DIFF_BYTES: 51200  # 50KB max diff size
+
 jobs:
   gemini-assist:
     if: contains(github.event.comment.body, '@gemini-cli')
@@ -46,6 +49,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
           COMMENT_BODY: ${{ github.event.comment.body }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           cat > on-demand.js << 'SCRIPT'
           const { GoogleGenerativeAI } = require('@google/generative-ai');
@@ -56,9 +60,12 @@ jobs:
             const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
             const modelName = process.env.GEMINI_MODEL || 'gemini-2.5-pro';
             const model = genAI.getGenerativeModel({ model: modelName });
+            const defaultBranch = process.env.DEFAULT_BRANCH || 'master';
+            const maxDiffBytes = parseInt(process.env.MAX_DIFF_BYTES) || 51200;
 
             console.log('Using Gemini model: ' + modelName);
 
+            // Load project context
             let context = '';
             try {
               context = fs.readFileSync('GEMINI.md', 'utf8');
@@ -72,7 +79,26 @@ jobs:
             let prompt = '';
 
             if (isCodeReview) {
-              const diff = execSync('git diff origin/master...HEAD').toString();
+              // Get diff with error handling (may fail on issues or if no diff exists)
+              let diff = '';
+              try {
+                diff = execSync(
+                  'git diff origin/' + defaultBranch + '...HEAD' +
+                  ' -- . ":!*.lock" ":!*.png" ":!*.jpg" ":!coverage/" ":!.next/" ":!dist/" ":!*.min.js" ":!package-lock.json"',
+                  { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 }
+                );
+              } catch (err) {
+                console.log('Warning: Could not generate diff — this may be an issue (not a PR), or the branch has no changes.');
+                diff = '(No diff available — this comment may be on an issue rather than a PR)';
+              }
+
+              // Truncate large diffs
+              if (Buffer.byteLength(diff) > maxDiffBytes) {
+                const originalSize = Buffer.byteLength(diff);
+                diff = diff.substring(0, maxDiffBytes);
+                diff += '\n\n... [TRUNCATED — diff was ' + originalSize + ' bytes, showing first ' + maxDiffBytes + ']';
+              }
+
               prompt = 'You are reviewing code for this project.\n\n' +
                 'PROJECT CONTEXT:\n' + context + '\n\n' +
                 'USER REQUEST: ' + userQuestion + '\n\n' +
@@ -93,8 +119,7 @@ jobs:
               console.log(response.text());
             } catch (error) {
               console.error('Error calling Gemini API:', error.message);
-              fs.writeFileSync('response.md', 'Error: ' + error.message);
-              process.exit(1);
+              fs.writeFileSync('response.md', 'Gemini API error: ' + error.message + '\n\nPlease try again or check the GEMINI_API_KEY secret.');
             }
           }
 
@@ -109,7 +134,7 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            let response = 'Failed to generate response';
+            let response = 'Failed to generate response. Check the Actions log for details.';
 
             try {
               response = fs.readFileSync('response.md', 'utf8');

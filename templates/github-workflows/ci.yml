@@ -1,7 +1,7 @@
 # CI Pipeline Template
 # Copy to: .github/workflows/ci.yml
 #
-# CUSTOMIZE: Update the steps below for your project type.
+# CUSTOMIZE: Update the setup steps, commands, and coverage threshold for your project.
 # This template assumes Node.js — see comments for Python/Go alternatives.
 
 name: CI Pipeline
@@ -9,71 +9,222 @@ name: CI Pipeline
 on:
   push:
     branches: [master]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.gitignore'
   pull_request:
     branches: [master]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.gitignore'
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '20'             # <!-- CUSTOMIZE: your Node.js version -->
+  COVERAGE_THRESHOLD: 80         # <!-- CUSTOMIZE: minimum coverage % (0 to disable) -->
 
 jobs:
-  quality-checks:
+  # ── Lint ──────────────────────────────────────────────────────
+  lint:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
 
-      # ── Node.js Setup ──
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
 
       - name: Install dependencies
         run: npm ci
 
-      # ── Python Setup (uncomment if Python project) ──
-      # - name: Setup Python
-      #   uses: actions/setup-python@v5
-      #   with:
-      #     python-version: '3.12'
-      # - name: Install uv
-      #   run: pip install uv
-      # - name: Install dependencies
-      #   run: uv sync
-
-      # ── Go Setup (uncomment if Go project) ──
-      # - name: Setup Go
-      #   uses: actions/setup-go@v5
-      #   with:
-      #     go-version: '1.22'
-
-      # ── Lint ──
       - name: Lint
         run: npm run lint
-        # Python: run: uv run ruff check .
-        # Go: run: golangci-lint run
+        # Python: uv run ruff check .
+        # Go: golangci-lint run
 
-      # ── Type Check ──
+  # ── Type Check ────────────────────────────────────────────────
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
       - name: Type check
         run: npm run type-check
-        # Python: run: uv run mypy .
-        # Go: run: go vet ./...
+        # Python: uv run mypy .
+        # Go: go vet ./...
 
-      # ── Tests ──
+  # ── Tests + Coverage ──────────────────────────────────────────
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
       - name: Run tests with coverage
         run: npm run test:coverage
-        # Python: run: uv run pytest --cov --cov-report=xml
-        # Go: run: go test -race -coverprofile=coverage.out ./...
+        # Python: uv run pytest --cov --cov-report=json
+        # Go: go test -race -coverprofile=coverage.out -covermode=atomic ./...
 
-      # ── Build ──
-      - name: Build verification
-        run: npm run build
-        # Python: (usually not needed)
-        # Go: run: go build ./...
+      - name: Enforce coverage threshold
+        if: env.COVERAGE_THRESHOLD != '0'
+        run: |
+          # Parse coverage from Jest JSON summary
+          if [ -f coverage/coverage-summary.json ]; then
+            ACTUAL=$(node -e "
+              const c = require('./coverage/coverage-summary.json');
+              console.log(Math.floor(c.total.statements.pct));
+            ")
+            echo "Coverage: ${ACTUAL}% (threshold: ${{ env.COVERAGE_THRESHOLD }}%)"
+            if [ "$ACTUAL" -lt "${{ env.COVERAGE_THRESHOLD }}" ]; then
+              echo "::error::Coverage ${ACTUAL}% is below threshold ${{ env.COVERAGE_THRESHOLD }}%"
+              exit 1
+            fi
+          else
+            echo "::warning::No coverage-summary.json found. Ensure jest is configured with --coverageReporters=json-summary"
+          fi
 
-      # ── Artifacts ──
       - name: Upload coverage
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report
           path: coverage/
           # Python: path: coverage.xml
           # Go: path: coverage.out
+
+  # ── Security Audit ────────────────────────────────────────────
+  security-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Dependency audit
+        run: npm audit --audit-level=high
+        # Python: uv pip audit
+        # Go: govulncheck ./...
+
+      - name: Check for hardcoded secrets
+        run: |
+          echo "Scanning for hardcoded secrets..."
+          FOUND=$(grep -rnE \
+            '(sk-[a-zA-Z0-9]{20,}|AIza[a-zA-Z0-9_-]{35}|AKIA[A-Z0-9]{16}|ghp_[a-zA-Z0-9]{36})' \
+            --include='*.ts' --include='*.tsx' --include='*.js' --include='*.jsx' \
+            --include='*.py' --include='*.go' \
+            . 2>/dev/null \
+            | grep -v node_modules | grep -v .next | grep -v __pycache__ \
+            | grep -v '\.test\.' | grep -v '__tests__' | grep -v '_test\.' \
+            | grep -v 'quality-gate' | grep -v 'ci\.yml' | grep -v 'security\.yml' \
+            || true)
+
+          if [ -n "$FOUND" ]; then
+            echo "::error::Possible hardcoded API keys detected:"
+            echo "$FOUND"
+            exit 1
+          fi
+          echo "No hardcoded secrets found."
+
+  # ── Build (gated on all checks) ──────────────────────────────
+  build:
+    needs: [lint, typecheck, test, security-audit]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+        # Python: (usually not needed)
+        # Go: go build ./...
+
+  # ── Python Setup (uncomment entire job if Python project) ──
+  # lint:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: actions/setup-python@v5
+  #       with:
+  #         python-version: '3.12'
+  #     - run: pip install uv && uv sync
+  #     - run: uv run ruff check .
+  #
+  # typecheck:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: actions/setup-python@v5
+  #       with:
+  #         python-version: '3.12'
+  #     - run: pip install uv && uv sync
+  #     - run: uv run mypy .
+  #
+  # test:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: actions/setup-python@v5
+  #       with:
+  #         python-version: '3.12'
+  #     - run: pip install uv && uv sync
+  #     - run: uv run pytest --cov --cov-report=xml
+
+  # ── Go Setup (uncomment entire job if Go project) ──
+  # lint:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: actions/setup-go@v5
+  #       with:
+  #         go-version: '1.22'
+  #     - run: golangci-lint run
+  #
+  # test:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: actions/setup-go@v5
+  #       with:
+  #         go-version: '1.22'
+  #     - run: go test -race -coverprofile=coverage.out ./...

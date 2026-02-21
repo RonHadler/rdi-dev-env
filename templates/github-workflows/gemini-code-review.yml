@@ -5,6 +5,14 @@
 #   1. Add GEMINI_API_KEY to GitHub repo secrets
 #   2. Optionally set GEMINI_MODEL as a repo variable (default: gemini-2.5-pro)
 #   3. Create GEMINI.md in repo root with review standards
+#
+# FEATURES:
+#   - Extracts PR title, description, and commit messages for context
+#   - Filters out binary/generated files from the diff
+#   - Truncates large diffs to stay within token limits
+#   - Requests structured JSON severity counts from Gemini
+#   - Optional blocking mode for critical issues
+#   - Skip with [skip-review] in PR title
 
 name: Gemini Code Review
 
@@ -17,8 +25,15 @@ permissions:
   pull-requests: write
   issues: write
 
+env:
+  MAX_DIFF_BYTES: 51200           # 50KB max diff size sent to Gemini
+  # <!-- CUSTOMIZE: Set to 'true' to fail the workflow on critical findings -->
+  BLOCK_ON_CRITICAL: 'false'
+
 jobs:
   code-review:
+    # Skip if PR title contains [skip-review]
+    if: "!contains(github.event.pull_request.title, '[skip-review]')"
     runs-on: ubuntu-latest
 
     steps:
@@ -35,24 +50,78 @@ jobs:
       - name: Install Gemini SDK
         run: npm install @google/generative-ai
 
-      - name: Get changed files
-        id: changed-files
-        run: |
-          git diff --name-only origin/${{ github.base_ref }}...HEAD > changed_files.txt
-          echo "Changed files:"
-          cat changed_files.txt
+      # ── Extract PR metadata ──
+      - name: Extract PR context
+        id: pr-context
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const commits = await github.rest.pulls.listCommits({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+              per_page: 30
+            });
 
+            const commitMessages = commits.data
+              .map(c => `- ${c.commit.message.split('\n')[0]}`)
+              .join('\n');
+
+            const fs = require('fs');
+            fs.writeFileSync('pr-context.json', JSON.stringify({
+              title: pr.title,
+              description: pr.body || '(no description)',
+              commits: commitMessages,
+              author: pr.user.login,
+              baseBranch: pr.base.ref,
+              headBranch: pr.head.ref
+            }, null, 2));
+
+      # ── Get filtered diff ──
+      - name: Get filtered diff
+        id: diff
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          # Get diff excluding binary/generated files
+          DIFF=$(git diff "origin/${BASE_REF}...HEAD" \
+            -- . \
+            ':!*.lock' ':!*.png' ':!*.jpg' ':!*.jpeg' ':!*.gif' ':!*.svg' ':!*.ico' \
+            ':!*.woff' ':!*.woff2' ':!*.ttf' ':!*.eot' \
+            ':!coverage/' ':!.next/' ':!dist/' ':!build/' \
+            ':!*.min.js' ':!*.min.css' ':!*.map' \
+            ':!package-lock.json' ':!yarn.lock' ':!pnpm-lock.yaml' \
+            2>/dev/null || echo "")
+
+          if [ -z "$DIFF" ]; then
+            echo "No reviewable code changes found."
+            echo "empty=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Truncate if too large
+          BYTE_COUNT=$(echo "$DIFF" | wc -c)
+          if [ "$BYTE_COUNT" -gt "${{ env.MAX_DIFF_BYTES }}" ]; then
+            echo "::warning::Diff is ${BYTE_COUNT} bytes, truncating to ${{ env.MAX_DIFF_BYTES }} bytes"
+            DIFF="$(echo "$DIFF" | head -c "${{ env.MAX_DIFF_BYTES }}")$(printf '\n\n[TRUNCATED — diff exceeded %s bytes, showing first %s]' "$BYTE_COUNT" "${{ env.MAX_DIFF_BYTES }}")"
+          fi
+
+          # Write to file (avoids shell escaping issues)
+          echo "$DIFF" > filtered-diff.txt
+          echo "empty=false" >> "$GITHUB_OUTPUT"
+
+      # ── Generate review ──
       - name: Generate code review
+        if: steps.diff.outputs.empty != 'true'
         id: review
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
-          GITHUB_BASE_REF: ${{ github.base_ref }}
         run: |
           cat > review.js << 'SCRIPT'
           const { GoogleGenerativeAI } = require('@google/generative-ai');
           const fs = require('fs');
-          const { execSync } = require('child_process');
 
           async function main() {
             const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
@@ -61,40 +130,50 @@ jobs:
 
             console.log('Using Gemini model: ' + modelName);
 
-            // Read GEMINI.md for project-specific review context
-            let context = '';
+            // Load project review standards
+            let standards = '';
             try {
-              context = fs.readFileSync('GEMINI.md', 'utf8');
+              standards = fs.readFileSync('GEMINI.md', 'utf8');
             } catch (e) {
               console.log('Warning: GEMINI.md not found, using default review standards');
             }
 
-            // Get the diff
-            const diff = execSync('git diff origin/' + process.env.GITHUB_BASE_REF + '...HEAD').toString();
-
-            if (!diff.trim()) {
-              console.log('No code changes to review');
-              process.exit(0);
+            // Load PR context
+            let prContext = {};
+            try {
+              prContext = JSON.parse(fs.readFileSync('pr-context.json', 'utf8'));
+            } catch (e) {
+              console.log('Warning: Could not load PR context');
             }
 
-            const prompt = 'You are reviewing a pull request.\n\n' +
-              'PROJECT CONTEXT:\n' + context + '\n\n' +
+            // Load diff
+            const diff = fs.readFileSync('filtered-diff.txt', 'utf8');
+
+            const prompt = 'You are an expert code reviewer for a software project.\n\n' +
+              'PROJECT REVIEW STANDARDS:\n' + standards + '\n\n' +
+              'PULL REQUEST CONTEXT:\n' +
+              '- Title: ' + (prContext.title || 'Unknown') + '\n' +
+              '- Description: ' + (prContext.description || 'None') + '\n' +
+              '- Author: ' + (prContext.author || 'Unknown') + '\n' +
+              '- Branch: ' + (prContext.headBranch || 'Unknown') + ' → ' + (prContext.baseBranch || 'Unknown') + '\n' +
+              '- Commits:\n' + (prContext.commits || 'Unknown') + '\n\n' +
               'INSTRUCTIONS:\n' +
-              'Review all changed files and provide feedback on:\n' +
-              '1. **Critical Issues** (block merge) - Security vulnerabilities, data loss risks, breaking changes, domain layer importing external packages\n' +
-              '2. **High Priority** (strong warning) - Architecture violations, untestable code, performance issues, business logic in API routes\n' +
-              '3. **Medium Priority** (suggestions) - Code style violations, missing tests, loose typing\n' +
-              '4. **Low Priority** (informational) - Minor improvements, documentation\n\n' +
+              'Review all changed files and provide feedback organized by severity:\n' +
+              '1. **Critical Issues** (block merge) — Security vulnerabilities, data loss risks, breaking changes, domain layer importing external packages\n' +
+              '2. **High Priority** (strong warning) — Architecture violations, untestable code, performance issues, business logic in API routes\n' +
+              '3. **Medium Priority** (suggestions) — Code style violations, missing tests, loose typing\n' +
+              '4. **Low Priority** (informational) — Minor improvements, documentation\n\n' +
               'CODE CHANGES:\n```diff\n' + diff + '\n```\n\n' +
-              'Please provide a concise, actionable review. Be specific about line numbers.\n' +
-              'If the code looks good, approve it! Don\'t nitpick on minor formatting.\n\n' +
-              'Format your response as:\n' +
+              'FORMAT YOUR RESPONSE EXACTLY AS:\n\n' +
               '## Code Review Summary\n\n' +
-              '### Critical Issues\n[List or "None"]\n\n' +
+              '### Critical Issues\n[List specific issues with file paths and line numbers, or "None"]\n\n' +
               '### High Priority\n[List or "None"]\n\n' +
               '### Medium Priority\n[List or "None"]\n\n' +
               '### Low Priority\n[List or "None"]\n\n' +
-              '### Overall Assessment\n[Summary and merge recommendation]';
+              '### Overall Assessment\n[Summary and merge recommendation]\n\n' +
+              'SEVERITY_JSON:\n```json\n{"critical": N, "high": N, "medium": N, "low": N}\n```\n\n' +
+              'Be specific about file paths and line numbers. If the code looks good, approve it.\n' +
+              'Do not nitpick on minor formatting. Focus on substance.';
 
             try {
               const result = await model.generateContent(prompt);
@@ -102,9 +181,18 @@ jobs:
               const text = response.text();
               fs.writeFileSync('review.md', text);
               console.log(text);
+
+              // Extract severity counts
+              const jsonMatch = text.match(/SEVERITY_JSON:\s*```json\s*({[^}]+})\s*```/);
+              if (jsonMatch) {
+                const counts = JSON.parse(jsonMatch[1]);
+                fs.writeFileSync('severity.json', JSON.stringify(counts));
+              }
             } catch (error) {
               console.error('Error calling Gemini API:', error.message);
-              process.exit(1);
+              fs.writeFileSync('review.md', '## Code Review\n\nGemini API call failed: ' + error.message + '\n\nPlease review this PR manually.');
+              fs.writeFileSync('severity.json', '{"critical": 0, "high": 0, "medium": 0, "low": 0}');
+              // Don't exit 1 — still post the fallback comment
             }
           }
 
@@ -113,35 +201,55 @@ jobs:
 
           node review.js
 
+      # ── Post review comment ──
       - name: Post review comment
-        if: success()
+        if: steps.diff.outputs.empty != 'true'
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
-            const review = fs.readFileSync('review.md', 'utf8');
+
+            let review = 'No review generated.';
+            try {
+              review = fs.readFileSync('review.md', 'utf8');
+            } catch (e) {
+              console.log('No review file found');
+            }
+
+            // Remove the SEVERITY_JSON block from the posted comment
+            review = review.replace(/SEVERITY_JSON:\s*```json[\s\S]*?```/g, '').trim();
+
+            let severityLine = '';
+            try {
+              const counts = JSON.parse(fs.readFileSync('severity.json', 'utf8'));
+              severityLine = `\n\n**Findings:** ${counts.critical} critical, ${counts.high} high, ${counts.medium} medium, ${counts.low} low`;
+            } catch (e) { /* no severity data */ }
 
             await github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `## AI Code Review\n\n${review}\n\n---\n*Powered by Gemini AI*`
+              body: `## AI Code Review${severityLine}\n\n${review}\n\n---\n*Powered by Gemini AI*`
             });
 
+      # ── Workflow summary ──
       - name: Add to workflow summary
         if: always()
         run: |
           if [ -f review.md ]; then
-            echo "## AI Code Review" >> $GITHUB_STEP_SUMMARY
-            cat review.md >> $GITHUB_STEP_SUMMARY
+            echo "## AI Code Review" >> "$GITHUB_STEP_SUMMARY"
+            # Strip SEVERITY_JSON from summary too
+            sed '/SEVERITY_JSON:/,/```$/d' review.md >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      # ── Optional: Block on critical ──
       - name: Check for critical issues
-        if: success()
+        if: env.BLOCK_ON_CRITICAL == 'true' && steps.diff.outputs.empty != 'true'
         run: |
-          if [ -f review.md ]; then
-            if grep -i "Critical Issues" review.md | grep -v "None"; then
-              echo "Critical issues found. Please review the feedback above."
-              echo "This check will not fail the build, but please address critical issues before merging."
+          if [ -f severity.json ]; then
+            CRITICAL=$(node -e "console.log(JSON.parse(require('fs').readFileSync('severity.json','utf8')).critical)")
+            if [ "$CRITICAL" -gt 0 ]; then
+              echo "::error::Gemini found $CRITICAL critical issue(s). Review the PR comment for details."
+              exit 1
             fi
           fi

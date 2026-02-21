@@ -68,7 +68,7 @@ That's it. You now have tmux configured, 3 Claude Code slash commands, and 5 Age
 | `scripts/` | `quality-gate.sh` | Continuous quality watch (security, types, tests) |
 | `commands/` | `review-pr.md`, `quality.md`, `deploy.md` | Claude Code `/slash-commands` |
 | `skills/` | 5 skills with references | Claude Code Agent Skills (auto-triggered) |
-| `templates/` | 4 agent context + 3 workflow templates | Copy to new projects, customize |
+| `templates/` | 4 agent context + 5 workflow + 2 config templates | Copy to new projects, customize |
 | `install.sh` | Symlink installer | Wires everything into the right locations |
 
 ---
@@ -287,11 +287,15 @@ Templates provide a starting point for AI agent context files and GitHub Actions
 
 | Template | Triggers On | What It Does |
 |----------|-------------|--------------|
-| `ci.yml` | Push to master, all PRs | Lint -> Type check -> Tests -> Build |
-| `gemini-code-review.yml` | PR opened/updated | AI code review posted as PR comment |
+| `ci.yml` | Push to master, all PRs | Parallel lint, typecheck, test, security → gated build |
+| `security.yml` | PR opened/updated | Dependency audit, secret detection, SAST patterns |
+| `gemini-code-review.yml` | PR opened/updated | AI code review with PR context, diff filtering, structured output |
 | `gemini-on-demand.yml` | Comment with `@gemini-cli` | Answer questions or review code on demand |
+| `deploy-cloudrun.yml` | Push to master / manual | Build, push, deploy to Cloud Run with health check + rollback |
+| `stale.yml` | Weekly (Monday) | Mark and close inactive PRs/issues |
+| `dependabot.yml` | Dependabot schedule | Grouped dependency updates (npm + GitHub Actions) |
 
-**Setup required:** Add `GEMINI_API_KEY` to GitHub repo secrets. See `templates/github-workflows/README.md` for full instructions.
+**Setup required:** Add `GEMINI_API_KEY` to GitHub repo secrets. For deployments, configure GCP Workload Identity Federation. See `templates/github-workflows/README.md` for full instructions.
 
 ---
 
@@ -316,16 +320,22 @@ cp /mnt/c/Dev/rdi-dev-env/templates/GEMINI.md  .
 # 4. Copy GitHub Actions workflows
 mkdir -p .github/workflows
 cp /mnt/c/Dev/rdi-dev-env/templates/github-workflows/ci.yml .github/workflows/
+cp /mnt/c/Dev/rdi-dev-env/templates/github-workflows/security.yml .github/workflows/
 cp /mnt/c/Dev/rdi-dev-env/templates/github-workflows/gemini-code-review.yml .github/workflows/
 cp /mnt/c/Dev/rdi-dev-env/templates/github-workflows/gemini-on-demand.yml .github/workflows/
+cp /mnt/c/Dev/rdi-dev-env/templates/github-workflows/deploy-cloudrun.yml .github/workflows/
+cp /mnt/c/Dev/rdi-dev-env/templates/github-workflows/stale.yml .github/workflows/
 
-# 5. Customize ci.yml for your language (uncomment Python/Go sections if needed)
+# 5. Copy Dependabot config (note: .github/, NOT .github/workflows/)
+cp /mnt/c/Dev/rdi-dev-env/templates/github-workflows/dependabot.yml .github/dependabot.yml
 
-# 6. Create GitHub repo and add GEMINI_API_KEY secret
+# 6. Customize ci.yml for your language (uncomment Python/Go sections if needed)
+
+# 7. Create GitHub repo and add GEMINI_API_KEY secret
 gh repo create RonHadler/rdi-my-project --private --source=. --push
 # Then: GitHub repo > Settings > Secrets > Add GEMINI_API_KEY
 
-# 7. Verify tmux-dev.sh detects your project
+# 8. Verify tmux-dev.sh detects your project
 bash /mnt/c/Dev/rdi-dev-env/tmux/tmux-dev.sh . my-project
 ```
 
@@ -336,7 +346,8 @@ After copying templates, search for `<!-- CUSTOMIZE` in each file:
 - [ ] **AGENTS.md** — Project name, description, tech stack, file structure, env vars, commands
 - [ ] **CLAUDE.md** — Project name, startup steps, resources
 - [ ] **GEMINI.md** — Project name, language-specific quality standards, testing patterns
-- [ ] **ci.yml** — Uncomment the right language setup, adjust lint/test/build commands
+- [ ] **ci.yml** — Uncomment the right language setup, adjust lint/test/build commands, set coverage threshold
+- [ ] **deploy-cloudrun.yml** — GCP project ID, region, service name, Artifact Registry paths
 - [ ] **CODEX.md** (optional) — Project name, commands, architecture details
 
 ---
@@ -496,10 +507,14 @@ rdi-dev-env/
     |-- GEMINI.md                          # Gemini review standards
     |-- CODEX.md                           # OpenAI Codex context
     +-- github-workflows/
-        |-- ci.yml                         # CI pipeline
-        |-- gemini-code-review.yml         # Automated PR review
+        |-- ci.yml                         # CI pipeline (parallel jobs + coverage gate)
+        |-- security.yml                   # Security scanning (deps, secrets, SAST)
+        |-- gemini-code-review.yml         # Automated PR review (structured output)
         |-- gemini-on-demand.yml           # @gemini-cli interactive
-        +-- README.md                      # Setup guide
+        |-- deploy-cloudrun.yml            # Cloud Run deploy + health check + rollback
+        |-- dependabot.yml                 # Dependency update config (→ .github/)
+        |-- stale.yml                      # Stale PR/issue cleanup
+        +-- README.md                      # Setup guide for all templates
 ```
 
 ---

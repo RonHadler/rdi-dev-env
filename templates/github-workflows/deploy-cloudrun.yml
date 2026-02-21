@@ -1,0 +1,167 @@
+# Cloud Run Deployment Template
+# Copy to: .github/workflows/deploy-cloudrun.yml
+#
+# PREREQUISITES:
+#   1. Set up Workload Identity Federation in GCP (see README.md)
+#   2. Add required secrets/variables to GitHub (see env section below)
+#   3. Create GitHub Environments: "staging" and "production" (production with required reviewers)
+#   4. Ensure Dockerfile exists in repo root
+#
+# CUSTOMIZE: Search for "<!-- CUSTOMIZE" and replace all placeholder values.
+
+name: Deploy to Cloud Run
+
+on:
+  push:
+    branches: [master]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment target'
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+        default: staging
+
+env:
+  GCP_PROJECT_ID: 'my-project'                          # <!-- CUSTOMIZE: GCP project ID -->
+  GCP_REGION: 'us-central1'                              # <!-- CUSTOMIZE: GCP region -->
+  SERVICE_NAME: 'my-service'                             # <!-- CUSTOMIZE: Cloud Run service name -->
+  ARTIFACT_REGISTRY: 'us-central1-docker.pkg.dev'        # <!-- CUSTOMIZE: Artifact Registry host -->
+  ARTIFACT_REPO: 'my-project/docker'                     # <!-- CUSTOMIZE: Artifact Registry repo path -->
+  HEALTH_CHECK_PATH: '/api/health/ping'                  # <!-- CUSTOMIZE: health check endpoint -->
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'staging' }}
+
+    permissions:
+      contents: read
+      id-token: write  # Required for Workload Identity Federation
+
+    env:
+      TARGET_ENV: ${{ github.event.inputs.environment || 'staging' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Authenticate with GCP ──
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}  # <!-- CUSTOMIZE: WIF provider -->
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}                         # <!-- CUSTOMIZE: SA email -->
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.ARTIFACT_REGISTRY }} --quiet
+
+      # ── Build & Push ──
+      - name: Build Docker image
+        run: |
+          IMAGE="${{ env.ARTIFACT_REGISTRY }}/${{ env.ARTIFACT_REPO }}/${{ env.SERVICE_NAME }}"
+          TAG="${{ github.sha }}"
+
+          docker build \
+            --tag "${IMAGE}:${TAG}" \
+            --tag "${IMAGE}:latest" \
+            --build-arg BUILD_SHA="${TAG}" \
+            --build-arg BUILD_ENV="${{ env.TARGET_ENV }}" \
+            .
+
+          echo "IMAGE=${IMAGE}" >> "$GITHUB_ENV"
+          echo "TAG=${TAG}" >> "$GITHUB_ENV"
+
+      - name: Push to Artifact Registry
+        run: |
+          docker push "${{ env.IMAGE }}:${{ env.TAG }}"
+          docker push "${{ env.IMAGE }}:latest"
+
+      # ── Deploy ──
+      - name: Deploy to Cloud Run
+        id: deploy
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ env.SERVICE_NAME }}
+          region: ${{ env.GCP_REGION }}
+          image: ${{ env.IMAGE }}:${{ env.TAG }}
+          # <!-- CUSTOMIZE: Add env vars, secrets, flags as needed -->
+          # env_vars: |
+          #   NODE_ENV=production
+          #   NEXT_PUBLIC_APP_URL=https://your-domain.com
+          # secrets: |
+          #   FIREBASE_SERVICE_ACCOUNT=firebase-sa:latest
+
+      - name: Get service URL
+        run: |
+          echo "Service URL: ${{ steps.deploy.outputs.url }}"
+          echo "SERVICE_URL=${{ steps.deploy.outputs.url }}" >> "$GITHUB_ENV"
+
+      # ── Health Check ──
+      - name: Health check
+        id: health
+        run: |
+          URL="${{ env.SERVICE_URL }}${{ env.HEALTH_CHECK_PATH }}"
+          echo "Checking: ${URL}"
+
+          for i in 1 2 3 4 5; do
+            echo "Attempt $i/5..."
+            STATUS=$(curl -s -o /dev/null -w '%{http_code}' "$URL" || true)
+            if [ "$STATUS" = "200" ]; then
+              echo "Health check passed (HTTP $STATUS)"
+              exit 0
+            fi
+            echo "Got HTTP $STATUS, waiting 10s..."
+            sleep 10
+          done
+
+          echo "::error::Health check failed after 5 attempts"
+          echo "health_failed=true" >> "$GITHUB_OUTPUT"
+
+      # ── Rollback on failure ──
+      - name: Rollback on health check failure
+        if: steps.health.outputs.health_failed == 'true'
+        run: |
+          echo "::warning::Rolling back to previous revision..."
+
+          # List revisions, get the second one (previous)
+          PREVIOUS=$(gcloud run revisions list \
+            --service=${{ env.SERVICE_NAME }} \
+            --region=${{ env.GCP_REGION }} \
+            --format='value(REVISION)' \
+            --sort-by='~CREATED' \
+            --limit=2 | tail -1)
+
+          if [ -n "$PREVIOUS" ]; then
+            gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
+              --region=${{ env.GCP_REGION }} \
+              --to-revisions="${PREVIOUS}=100"
+            echo "Rolled back to revision: ${PREVIOUS}"
+          else
+            echo "::error::No previous revision found for rollback"
+          fi
+
+          exit 1
+
+      # ── Summary ──
+      - name: Deployment summary
+        if: always()
+        run: |
+          echo "## Deployment Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Field | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Environment** | ${{ env.TARGET_ENV }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Service** | ${{ env.SERVICE_NAME }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Region** | ${{ env.GCP_REGION }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Image** | ${{ env.IMAGE }}:${{ env.TAG }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **URL** | ${{ env.SERVICE_URL }} |" >> "$GITHUB_STEP_SUMMARY"
