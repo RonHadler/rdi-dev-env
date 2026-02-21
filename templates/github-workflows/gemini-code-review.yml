@@ -1,0 +1,147 @@
+# Gemini Automated Code Review Template
+# Copy to: .github/workflows/gemini-code-review.yml
+#
+# PREREQUISITES:
+#   1. Add GEMINI_API_KEY to GitHub repo secrets
+#   2. Optionally set GEMINI_MODEL as a repo variable (default: gemini-2.5-pro)
+#   3. Create GEMINI.md in repo root with review standards
+
+name: Gemini Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  code-review:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Gemini SDK
+        run: npm install @google/generative-ai
+
+      - name: Get changed files
+        id: changed-files
+        run: |
+          git diff --name-only origin/${{ github.base_ref }}...HEAD > changed_files.txt
+          echo "Changed files:"
+          cat changed_files.txt
+
+      - name: Generate code review
+        id: review
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+          GITHUB_BASE_REF: ${{ github.base_ref }}
+        run: |
+          cat > review.js << 'SCRIPT'
+          const { GoogleGenerativeAI } = require('@google/generative-ai');
+          const fs = require('fs');
+          const { execSync } = require('child_process');
+
+          async function main() {
+            const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+            const modelName = process.env.GEMINI_MODEL || 'gemini-2.5-pro';
+            const model = genAI.getGenerativeModel({ model: modelName });
+
+            console.log('Using Gemini model: ' + modelName);
+
+            // Read GEMINI.md for project-specific review context
+            let context = '';
+            try {
+              context = fs.readFileSync('GEMINI.md', 'utf8');
+            } catch (e) {
+              console.log('Warning: GEMINI.md not found, using default review standards');
+            }
+
+            // Get the diff
+            const diff = execSync('git diff origin/' + process.env.GITHUB_BASE_REF + '...HEAD').toString();
+
+            if (!diff.trim()) {
+              console.log('No code changes to review');
+              process.exit(0);
+            }
+
+            const prompt = 'You are reviewing a pull request.\n\n' +
+              'PROJECT CONTEXT:\n' + context + '\n\n' +
+              'INSTRUCTIONS:\n' +
+              'Review all changed files and provide feedback on:\n' +
+              '1. **Critical Issues** (block merge) - Security vulnerabilities, data loss risks, breaking changes, domain layer importing external packages\n' +
+              '2. **High Priority** (strong warning) - Architecture violations, untestable code, performance issues, business logic in API routes\n' +
+              '3. **Medium Priority** (suggestions) - Code style violations, missing tests, loose typing\n' +
+              '4. **Low Priority** (informational) - Minor improvements, documentation\n\n' +
+              'CODE CHANGES:\n```diff\n' + diff + '\n```\n\n' +
+              'Please provide a concise, actionable review. Be specific about line numbers.\n' +
+              'If the code looks good, approve it! Don\'t nitpick on minor formatting.\n\n' +
+              'Format your response as:\n' +
+              '## Code Review Summary\n\n' +
+              '### Critical Issues\n[List or "None"]\n\n' +
+              '### High Priority\n[List or "None"]\n\n' +
+              '### Medium Priority\n[List or "None"]\n\n' +
+              '### Low Priority\n[List or "None"]\n\n' +
+              '### Overall Assessment\n[Summary and merge recommendation]';
+
+            try {
+              const result = await model.generateContent(prompt);
+              const response = await result.response;
+              const text = response.text();
+              fs.writeFileSync('review.md', text);
+              console.log(text);
+            } catch (error) {
+              console.error('Error calling Gemini API:', error.message);
+              process.exit(1);
+            }
+          }
+
+          main();
+          SCRIPT
+
+          node review.js
+
+      - name: Post review comment
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const review = fs.readFileSync('review.md', 'utf8');
+
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## AI Code Review\n\n${review}\n\n---\n*Powered by Gemini AI*`
+            });
+
+      - name: Add to workflow summary
+        if: always()
+        run: |
+          if [ -f review.md ]; then
+            echo "## AI Code Review" >> $GITHUB_STEP_SUMMARY
+            cat review.md >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Check for critical issues
+        if: success()
+        run: |
+          if [ -f review.md ]; then
+            if grep -i "Critical Issues" review.md | grep -v "None"; then
+              echo "Critical issues found. Please review the feedback above."
+              echo "This check will not fail the build, but please address critical issues before merging."
+            fi
+          fi

@@ -1,0 +1,79 @@
+# CI Pipeline Template
+# Copy to: .github/workflows/ci.yml
+#
+# CUSTOMIZE: Update the steps below for your project type.
+# This template assumes Node.js — see comments for Python/Go alternatives.
+
+name: CI Pipeline
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  quality-checks:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Node.js Setup ──
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # ── Python Setup (uncomment if Python project) ──
+      # - name: Setup Python
+      #   uses: actions/setup-python@v5
+      #   with:
+      #     python-version: '3.12'
+      # - name: Install uv
+      #   run: pip install uv
+      # - name: Install dependencies
+      #   run: uv sync
+
+      # ── Go Setup (uncomment if Go project) ──
+      # - name: Setup Go
+      #   uses: actions/setup-go@v5
+      #   with:
+      #     go-version: '1.22'
+
+      # ── Lint ──
+      - name: Lint
+        run: npm run lint
+        # Python: run: uv run ruff check .
+        # Go: run: golangci-lint run
+
+      # ── Type Check ──
+      - name: Type check
+        run: npm run type-check
+        # Python: run: uv run mypy .
+        # Go: run: go vet ./...
+
+      # ── Tests ──
+      - name: Run tests with coverage
+        run: npm run test:coverage
+        # Python: run: uv run pytest --cov --cov-report=xml
+        # Go: run: go test -race -coverprofile=coverage.out ./...
+
+      # ── Build ──
+      - name: Build verification
+        run: npm run build
+        # Python: (usually not needed)
+        # Go: run: go build ./...
+
+      # ── Artifacts ──
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+          # Python: path: coverage.xml
+          # Go: path: coverage.out
