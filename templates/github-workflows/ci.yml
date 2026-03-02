@@ -135,11 +135,18 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Dependency audit
+      # Two-tier audit: production deps hard-fail (they ship to users),
+      # all deps soft-fail (dev/build transitive vulns are lower risk).
+      # Once you've resolved all fixable vulns via `npm audit fix` + overrides,
+      # consider removing continue-on-error from Tier 2 as well.
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+        # Python: uv pip audit (production only)
+        # Go: govulncheck ./...
+
+      - name: Audit all dependencies
         continue-on-error: true
         run: npm audit --audit-level=high
-        # Python: uv pip audit
-        # Go: govulncheck ./...
 
       - name: Check for hardcoded secrets
         run: |
