@@ -1,11 +1,12 @@
 # Cloud Run Deployment Template
-# Copy to: .github/workflows/deploy-cloudrun.yml
+# Copy to: .github/workflows/deploy-{environment}.yml
 #
 # PREREQUISITES:
-#   1. Set up Workload Identity Federation in GCP (see README.md)
-#   2. Add required secrets/variables to GitHub (see env section below)
-#   3. Create GitHub Environments: "staging" and "production" (production with required reviewers)
-#   4. Ensure Dockerfile exists in repo root
+#   1. Set up Workload Identity Federation in GCP (Pulumi shared/workload-identity.ts)
+#   2. Create deploy service account (Pulumi shared/deploy-service-account.ts)
+#   3. Add required secrets to GitHub Environment (see env section below)
+#   4. Create GitHub Environments with appropriate protection rules
+#   5. Ensure Dockerfile exists in repo root
 #
 # CUSTOMIZE: Search for "<!-- CUSTOMIZE" and replace all placeholder values.
 
@@ -28,13 +29,14 @@ on:
           - production
         default: staging
 
+concurrency:
+  group: deploy-${{ github.event.inputs.environment || 'staging' }}
+  cancel-in-progress: true  # <!-- CUSTOMIZE: set false for staging/production -->
+
 env:
-  GCP_PROJECT_ID: 'my-project'                          # <!-- CUSTOMIZE: GCP project ID -->
   GCP_REGION: 'us-central1'                              # <!-- CUSTOMIZE: GCP region -->
   SERVICE_NAME: 'my-service'                             # <!-- CUSTOMIZE: Cloud Run service name -->
-  ARTIFACT_REGISTRY: 'us-central1-docker.pkg.dev'        # <!-- CUSTOMIZE: Artifact Registry host -->
-  ARTIFACT_REPO: 'my-project/docker'                     # <!-- CUSTOMIZE: Artifact Registry repo path -->
-  HEALTH_CHECK_PATH: '/api/health/ping'                  # <!-- CUSTOMIZE: health check endpoint -->
+  HEALTH_CHECK_PATH: '/health'                           # <!-- CUSTOMIZE: health check endpoint -->
 
 jobs:
   deploy:
@@ -51,24 +53,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # ── Authenticate with GCP ──
+      # ── Authenticate with GCP via Workload Identity Federation ──
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@v3
         with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}  # <!-- CUSTOMIZE: WIF provider -->
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}                         # <!-- CUSTOMIZE: SA email -->
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
+        uses: google-github-actions/setup-gcloud@v3
 
       - name: Configure Docker for Artifact Registry
-        run: gcloud auth configure-docker ${{ env.ARTIFACT_REGISTRY }} --quiet
+        run: gcloud auth configure-docker ${{ env.GCP_REGION }}-docker.pkg.dev --quiet
 
       # ── Build & Push ──
       - name: Build Docker image
         run: |
-          IMAGE="${{ env.ARTIFACT_REGISTRY }}/${{ env.ARTIFACT_REPO }}/${{ env.SERVICE_NAME }}"
+          IMAGE="${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.SERVICE_NAME }}-docker/${{ env.SERVICE_NAME }}"
           TAG="${{ github.sha }}"
 
           docker build \
@@ -89,15 +91,15 @@ jobs:
       # ── Deploy ──
       - name: Deploy to Cloud Run
         id: deploy
-        uses: google-github-actions/deploy-cloudrun@v2
+        uses: google-github-actions/deploy-cloudrun@v3
         with:
           service: ${{ env.SERVICE_NAME }}
           region: ${{ env.GCP_REGION }}
           image: ${{ env.IMAGE }}:${{ env.TAG }}
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
           # <!-- CUSTOMIZE: Add env vars, secrets, flags as needed -->
           # env_vars: |
           #   NODE_ENV=production
-          #   NEXT_PUBLIC_APP_URL=https://your-domain.com
           # secrets: |
           #   FIREBASE_SERVICE_ACCOUNT=firebase-sa:latest
 
@@ -107,6 +109,22 @@ jobs:
           echo "SERVICE_URL=${{ steps.deploy.outputs.url }}" >> "$GITHUB_ENV"
 
       # ── Health Check ──
+      # For public services: use HTTP curl against HEALTH_CHECK_PATH.
+      # For IAM-protected services (no public health endpoint): replace the
+      # curl block below with revision-level gcloud check:
+      #
+      #   REVISION=$(gcloud run revisions list \
+      #     --service=${{ env.SERVICE_NAME }} --region=${{ env.GCP_REGION }} \
+      #     --project=${{ secrets.GCP_PROJECT_ID }} \
+      #     --format='value(REVISION)' --sort-by='~CREATED' --limit=1)
+      #   READY=$(gcloud run revisions describe "${REVISION}" \
+      #     --region=${{ env.GCP_REGION }} --project=${{ secrets.GCP_PROJECT_ID }} \
+      #     --format='value(status.conditions.filter("type","Ready").map().extract("status").flatten())')
+      #
+      # IMPORTANT: Do NOT use `gcloud run services describe` with
+      # `status.conditions[0].status` — the index isn't guaranteed to be the
+      # "Ready" condition and service-level status lags during transitions,
+      # causing false rollbacks on healthy deploys.
       - name: Health check
         id: health
         run: |
@@ -133,10 +151,10 @@ jobs:
         run: |
           echo "::warning::Rolling back to previous revision..."
 
-          # List revisions, get the second one (previous)
           PREVIOUS=$(gcloud run revisions list \
             --service=${{ env.SERVICE_NAME }} \
             --region=${{ env.GCP_REGION }} \
+            --project=${{ secrets.GCP_PROJECT_ID }} \
             --format='value(REVISION)' \
             --sort-by='~CREATED' \
             --limit=2 | tail -1)
@@ -144,6 +162,7 @@ jobs:
           if [ -n "$PREVIOUS" ]; then
             gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
               --region=${{ env.GCP_REGION }} \
+              --project=${{ secrets.GCP_PROJECT_ID }} \
               --to-revisions="${PREVIOUS}=100"
             echo "Rolled back to revision: ${PREVIOUS}"
           else
@@ -163,5 +182,7 @@ jobs:
           echo "| **Environment** | ${{ env.TARGET_ENV }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Service** | ${{ env.SERVICE_NAME }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Region** | ${{ env.GCP_REGION }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| **Image** | ${{ env.IMAGE }}:${{ env.TAG }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Project** | ${{ secrets.GCP_PROJECT_ID }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Image** | \`${{ env.IMAGE }}:${{ env.TAG }}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **URL** | ${{ env.SERVICE_URL }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Commit** | ${{ github.sha }} |" >> "$GITHUB_STEP_SUMMARY"
