@@ -1,0 +1,79 @@
+name: Deploy Firestore Rules & Indexes
+
+# Deploys firestore.rules and firestore.indexes.json to all environments
+# when either file changes. These files should be identical across envs.
+#
+# Can also be triggered manually to force a sync (e.g., after initial
+# project setup or to recover from drift).
+#
+# Prerequisites:
+# 1. firebase.json in repo root with firestore config
+# 2. firestore.rules and firestore.indexes.json in repo root
+# 3. GitHub Environments (qa, staging, production) with GCP secrets
+# 4. Deploy service account needs Firebase Admin role
+#
+# <!-- CUSTOMIZE: Adjust environments in the matrix to match your setup -->
+
+on:
+  push:
+    branches: [develop]  # <!-- CUSTOMIZE: your default branch -->
+    paths:
+      - 'firestore.rules'
+      - 'firestore.indexes.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write  # Required for WIF
+
+concurrency:
+  group: deploy-firestore
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false  # Deploy to all envs even if one fails
+      matrix:
+        include:
+          # <!-- CUSTOMIZE: Add/remove environments to match your setup -->
+          - environment: qa
+            project_secret: GCP_PROJECT_ID
+          - environment: staging
+            project_secret: GCP_PROJECT_ID
+          - environment: production
+            project_secret: GCP_PROJECT_ID
+
+    environment: ${{ matrix.environment }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Deploy Firestore rules & indexes
+        run: |
+          PROJECT="${{ secrets[matrix.project_secret] }}"
+          echo "Deploying Firestore to ${PROJECT} (${{ matrix.environment }})"
+
+          npx firebase-tools deploy \
+            --only firestore \
+            --project "$PROJECT" \
+            --force
+
+      - name: Deployment summary
+        if: always()
+        run: |
+          echo "## Firestore Deploy — ${{ matrix.environment }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Field | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Environment** | ${{ matrix.environment }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Project** | ${{ secrets[matrix.project_secret] }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Trigger** | ${{ github.event_name }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Commit** | ${{ github.sha }} |" >> "$GITHUB_STEP_SUMMARY"

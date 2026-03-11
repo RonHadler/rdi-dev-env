@@ -12,6 +12,10 @@ cp /path/to/rdi-dev-env/templates/github-workflows/security.yml .github/workflow
 cp /path/to/rdi-dev-env/templates/github-workflows/gemini-code-review.yml .github/workflows/
 cp /path/to/rdi-dev-env/templates/github-workflows/gemini-on-demand.yml .github/workflows/
 cp /path/to/rdi-dev-env/templates/github-workflows/deploy-cloudrun.yml .github/workflows/
+# For Next.js projects, use the Next.js variant instead:
+# cp /path/to/rdi-dev-env/templates/github-workflows/deploy-cloudrun-nextjs.yml .github/workflows/deploy-qa.yml
+# For projects with Firestore:
+# cp /path/to/rdi-dev-env/templates/github-workflows/deploy-firestore.yml .github/workflows/
 cp /path/to/rdi-dev-env/templates/github-workflows/stale.yml .github/workflows/
 
 # Dependabot config (NOTE: goes in .github/, NOT .github/workflows/)
@@ -31,8 +35,9 @@ Configure these in GitHub repo > Settings > Secrets and variables > Actions:
 | Secret | Used By | Description |
 |--------|---------|-------------|
 | `GEMINI_API_KEY` | gemini-code-review, gemini-on-demand | Google AI Studio API key ([get one](https://aistudio.google.com/apikey)) |
-| `GCP_WORKLOAD_IDENTITY_PROVIDER` | deploy-cloudrun | Workload Identity Federation provider |
-| `GCP_SERVICE_ACCOUNT` | deploy-cloudrun | GCP service account email |
+| `GCP_WORKLOAD_IDENTITY_PROVIDER` | deploy-cloudrun | WIF provider resource name (from Pulumi output) |
+| `GCP_DEPLOY_SERVICE_ACCOUNT` | deploy-cloudrun | Deploy service account email |
+| `GCP_PROJECT_ID` | deploy-cloudrun | GCP project ID for the target environment |
 
 ### Variables
 
@@ -148,18 +153,69 @@ Deploy to Cloud Run → Health check (5 retries) → Rollback if failed
 
 **Prerequisites:**
 1. Dockerfile in repo root
-2. GCP Workload Identity Federation configured ([setup guide](https://cloud.google.com/iam/docs/workload-identity-federation-with-deployment-pipelines))
-3. Artifact Registry repository created
-4. GitHub Environments configured (staging + production with approval)
+2. GCP Workload Identity Federation configured (Pulumi `shared/workload-identity.ts`)
+3. Deploy service account created (Pulumi `shared/deploy-service-account.ts`)
+4. Artifact Registry repository created
+5. GitHub Environments with secrets: `GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_DEPLOY_SERVICE_ACCOUNT`, `GCP_PROJECT_ID`
 
 **Customization:** Replace all `<!-- CUSTOMIZE -->` values:
-- `GCP_PROJECT_ID`, `GCP_REGION`, `SERVICE_NAME`
-- `ARTIFACT_REGISTRY`, `ARTIFACT_REPO`
-- `HEALTH_CHECK_PATH`
+- `GCP_REGION`, `SERVICE_NAME`, `HEALTH_CHECK_PATH`
+
+**GitHub Environment Secrets (per environment):**
+
+| Secret | Description |
+|--------|-------------|
+| `GCP_WORKLOAD_IDENTITY_PROVIDER` | Full WIF provider resource name from Pulumi output |
+| `GCP_DEPLOY_SERVICE_ACCOUNT` | Deploy SA email (e.g., `github-actions-deploy@project.iam.gserviceaccount.com`) |
+| `GCP_PROJECT_ID` | GCP project ID for this environment |
 
 ---
 
-### 6. Dependabot (`dependabot.yml`)
+### 5b. Cloud Run Deployment — Next.js (`deploy-cloudrun-nextjs.yml`)
+
+Extends the base template with Next.js-specific features:
+- Fetches `NEXT_PUBLIC_*` secrets from GCP Secret Manager at build time
+- Passes secrets as `--build-arg` to Docker for static compilation
+- Targets the `production` Docker stage with `--platform linux/amd64`
+
+**Additional prerequisites:**
+- `NEXT_PUBLIC_*` secrets populated in GCP Secret Manager
+- Multi-stage Dockerfile with `production` target
+
+**Customization:** Same as base, plus add/remove `NEXT_PUBLIC_*` secrets in the "Fetch build secrets" step
+
+---
+
+### 6. Firestore Deploy (`deploy-firestore.yml`)
+
+**Triggers:**
+- Auto: Push to default branch when `firestore.rules` or `firestore.indexes.json` change
+- Manual: `workflow_dispatch` to force sync
+
+**Flow:**
+```
+Authenticate (WIF) → Deploy rules & indexes to all environments (parallel matrix)
+```
+
+**Key features:**
+- Deploys to all environments simultaneously via matrix strategy
+- `fail-fast: false` ensures one env failure doesn't block others
+- Manual trigger for initial setup or drift recovery
+- Uses `npx firebase-tools` (no global install needed)
+
+**Prerequisites:**
+1. `firebase.json` in repo root with `firestore` config
+2. `firestore.rules` and `firestore.indexes.json` in repo root
+3. GitHub Environments with GCP secrets (same as deploy-cloudrun)
+4. Deploy service account needs `roles/firebase.admin` or `roles/datastore.owner`
+
+**Customization:** Replace `<!-- CUSTOMIZE -->` values:
+- Default branch (if not `develop`)
+- Environment names and count in matrix
+
+---
+
+### 7. Dependabot (`dependabot.yml`)
 
 **Note:** This is NOT a workflow. Copy to `.github/dependabot.yml` (not `.github/workflows/`).
 
@@ -172,7 +228,7 @@ Deploy to Cloud Run → Health check (5 retries) → Rollback if failed
 
 ---
 
-### 7. Stale Cleanup (`stale.yml`)
+### 8. Stale Cleanup (`stale.yml`)
 
 **Triggers:** Weekly (Monday 9am UTC) + manual
 
