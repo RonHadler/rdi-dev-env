@@ -1,57 +1,63 @@
-# Cloud Run Deployment Template
+# Cloud Run Deployment Template — Next.js Variant
 # Copy to: .github/workflows/deploy-{environment}.yml
 #
+# Extends the base deploy-cloudrun.yml with:
+#   - NEXT_PUBLIC_* secret fetching from GCP Secret Manager
+#   - Build args passed to Docker for Next.js static compilation
+#   - Multi-stage Docker build targeting 'production' stage
+#
 # PREREQUISITES:
-#   1. Set up Workload Identity Federation in GCP (Pulumi shared/workload-identity.ts)
-#   2. Create deploy service account (Pulumi shared/deploy-service-account.ts)
-#   3. Add required secrets to GitHub Environment (see env section below)
-#   4. Create GitHub Environments with appropriate protection rules
-#   5. Ensure Dockerfile exists in repo root
+#   1. Workload Identity Federation configured (Pulumi shared/workload-identity.ts)
+#   2. Deploy service account with secretmanager.secretAccessor (Pulumi shared/deploy-service-account.ts)
+#   3. NEXT_PUBLIC_* secrets populated in GCP Secret Manager
+#   4. GitHub Environments with secrets: GCP_WORKLOAD_IDENTITY_PROVIDER, GCP_DEPLOY_SERVICE_ACCOUNT, GCP_PROJECT_ID
+#   5. Multi-stage Dockerfile with 'production' target
 #
 # CUSTOMIZE: Search for "<!-- CUSTOMIZE" and replace all placeholder values.
 
-name: Deploy to Cloud Run
+name: Deploy to Cloud Run (Next.js)
 
 on:
   push:
-    branches: [master]
+    branches: [develop]                                  # <!-- CUSTOMIZE: trigger branch -->
     paths-ignore:
       - '**.md'
       - 'docs/**'
   workflow_dispatch:
     inputs:
-      environment:
-        description: 'Deployment target'
-        required: true
-        type: choice
-        options:
-          - staging
-          - production
-        default: staging
+      ref:
+        description: 'Git ref to deploy (branch, tag, or SHA)'
+        required: false
+        default: ''
+        type: string
 
 concurrency:
-  group: deploy-${{ github.event.inputs.environment || 'staging' }}
+  group: deploy-${{ github.workflow }}
   cancel-in-progress: true  # <!-- CUSTOMIZE: set false for staging/production -->
 
 env:
   GCP_REGION: 'us-central1'                              # <!-- CUSTOMIZE: GCP region -->
   SERVICE_NAME: 'my-service'                             # <!-- CUSTOMIZE: Cloud Run service name -->
-  HEALTH_CHECK_PATH: '/health'                           # <!-- CUSTOMIZE: health check endpoint -->
+  HEALTH_CHECK_PATH: '/api/health/ping'                  # <!-- CUSTOMIZE: health check endpoint -->
 
 jobs:
+  # ── Optional: Gate on CI ──
+  # ci:
+  #   uses: ./.github/workflows/ci.yml
+
   deploy:
     runs-on: ubuntu-latest
-    environment: ${{ github.event.inputs.environment || 'staging' }}
+    # needs: [ci]                                         # <!-- CUSTOMIZE: uncomment to gate on CI -->
+    environment: staging                                  # <!-- CUSTOMIZE: environment name -->
 
     permissions:
       contents: read
       id-token: write  # Required for Workload Identity Federation
 
-    env:
-      TARGET_ENV: ${{ github.event.inputs.environment || 'staging' }}
-
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
 
       # ── Authenticate with GCP via Workload Identity Federation ──
       - name: Authenticate to Google Cloud
@@ -67,20 +73,66 @@ jobs:
       - name: Configure Docker for Artifact Registry
         run: gcloud auth configure-docker ${{ env.GCP_REGION }}-docker.pkg.dev --quiet
 
+      # ── Fetch NEXT_PUBLIC_* secrets from GCP Secret Manager ──
+      # Uses dynamic delimiter for robustness against special characters in secret values
+      - name: Fetch build secrets from Secret Manager
+        run: |
+          PROJECT="${{ secrets.GCP_PROJECT_ID }}"
+
+          fetch_secret() {
+            local name="$1"
+            local optional="${2:-false}"
+            local val
+            if [ "$optional" = "true" ]; then
+              val=$(gcloud secrets versions access latest --secret="$name" --project="$PROJECT" 2>/dev/null || echo '')
+            else
+              val=$(gcloud secrets versions access latest --secret="$name" --project="$PROJECT")
+            fi
+            local delim
+            delim=$(openssl rand -hex 8)
+            echo "${name}<<${delim}" >> "$GITHUB_ENV"
+            echo "$val" >> "$GITHUB_ENV"
+            echo "${delim}" >> "$GITHUB_ENV"
+          }
+
+          # <!-- CUSTOMIZE: Add/remove secrets as needed -->
+          fetch_secret NEXT_PUBLIC_FIREBASE_API_KEY
+          fetch_secret NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
+          fetch_secret NEXT_PUBLIC_FIREBASE_PROJECT_ID
+          fetch_secret NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET
+          fetch_secret NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID
+          fetch_secret NEXT_PUBLIC_FIREBASE_APP_ID
+          fetch_secret NEXT_PUBLIC_DEBUG_MODE
+          fetch_secret NEXT_PUBLIC_APP_URL
+          fetch_secret NEXT_PUBLIC_APP_ENV
+          fetch_secret NEXT_PUBLIC_SENTRY_DSN true
+
       # ── Build & Push ──
       - name: Build Docker image
         run: |
-          IMAGE="${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.SERVICE_NAME }}-docker/${{ env.SERVICE_NAME }}"
+          IMAGE="${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/elevateai-docker/${{ env.SERVICE_NAME }}"
           # Use git rev-parse instead of github.sha — when deploying a custom ref
           # (e.g., v1.2.0 via workflow_dispatch), github.sha resolves to the trigger
           # branch, not the checked-out ref.
           TAG="$(git rev-parse HEAD)"
 
+          # Use native bash $VAR expansion (not ${{ env.VAR }}) to prevent shell
+          # injection if a secret value contains double-quote characters.
           docker build \
+            --target production \
+            --platform linux/amd64 \
             --tag "${IMAGE}:${TAG}" \
             --tag "${IMAGE}:latest" \
-            --build-arg BUILD_SHA="${TAG}" \
-            --build-arg BUILD_ENV="${{ env.TARGET_ENV }}" \
+            --build-arg NEXT_PUBLIC_FIREBASE_API_KEY="$NEXT_PUBLIC_FIREBASE_API_KEY" \
+            --build-arg NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN="$NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN" \
+            --build-arg NEXT_PUBLIC_FIREBASE_PROJECT_ID="$NEXT_PUBLIC_FIREBASE_PROJECT_ID" \
+            --build-arg NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET="$NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET" \
+            --build-arg NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID="$NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID" \
+            --build-arg NEXT_PUBLIC_FIREBASE_APP_ID="$NEXT_PUBLIC_FIREBASE_APP_ID" \
+            --build-arg NEXT_PUBLIC_DEBUG_MODE="$NEXT_PUBLIC_DEBUG_MODE" \
+            --build-arg NEXT_PUBLIC_APP_URL="$NEXT_PUBLIC_APP_URL" \
+            --build-arg NEXT_PUBLIC_APP_ENV="$NEXT_PUBLIC_APP_ENV" \
+            --build-arg NEXT_PUBLIC_SENTRY_DSN="$NEXT_PUBLIC_SENTRY_DSN" \
             .
 
           echo "IMAGE=${IMAGE}" >> "$GITHUB_ENV"
@@ -112,22 +164,6 @@ jobs:
           echo "SERVICE_URL=${SERVICE_URL}" >> "$GITHUB_ENV"
 
       # ── Health Check ──
-      # For public services: use HTTP curl against HEALTH_CHECK_PATH.
-      # For IAM-protected services (no public health endpoint): replace the
-      # curl block below with revision-level gcloud check:
-      #
-      #   REVISION=$(gcloud run revisions list \
-      #     --service=${{ env.SERVICE_NAME }} --region=${{ env.GCP_REGION }} \
-      #     --project=${{ secrets.GCP_PROJECT_ID }} \
-      #     --format='value(REVISION)' --sort-by='~CREATED' --limit=1)
-      #   READY=$(gcloud run revisions describe "${REVISION}" \
-      #     --region=${{ env.GCP_REGION }} --project=${{ secrets.GCP_PROJECT_ID }} \
-      #     --format='value(status.conditions.filter("type","Ready").map().extract("status").flatten())')
-      #
-      # IMPORTANT: Do NOT use `gcloud run services describe` with
-      # `status.conditions[0].status` — the index isn't guaranteed to be the
-      # "Ready" condition and service-level status lags during transitions,
-      # causing false rollbacks on healthy deploys.
       - name: Health check
         id: health
         run: |
@@ -182,7 +218,7 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| Field | Value |" >> "$GITHUB_STEP_SUMMARY"
           echo "|-------|-------|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| **Environment** | ${{ env.TARGET_ENV }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Environment** | ${{ env.SERVICE_NAME }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Service** | ${{ env.SERVICE_NAME }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Region** | ${{ env.GCP_REGION }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Project** | ${{ secrets.GCP_PROJECT_ID }} |" >> "$GITHUB_STEP_SUMMARY"
