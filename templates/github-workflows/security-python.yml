@@ -1,0 +1,225 @@
+# Security Scanning — Python/uv
+# Copy to: .github/workflows/security.yml
+#
+# Runs dependency audit (pip-audit), secret detection, and SAST pattern checks on PRs.
+# Posts a structured summary as a PR comment.
+
+name: Security Scan
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  BLOCK_ON_CRITICAL: 'false'
+
+jobs:
+  security-scan:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      # ── Tier 1: Dependency Vulnerabilities ──
+      - name: Dependency audit
+        id: deps
+        continue-on-error: true
+        run: |
+          echo "## Dependency Audit" > deps-report.md
+
+          uv pip install pip-audit
+
+          AUDIT_OUTPUT=$(uv run pip-audit --format=json 2>/dev/null || true)
+          HIGH=0
+          TOTAL=0
+
+          if [ -n "$AUDIT_OUTPUT" ] && echo "$AUDIT_OUTPUT" | python3 -c "import sys,json; json.load(sys.stdin)" 2>/dev/null; then
+            TOTAL=$(echo "$AUDIT_OUTPUT" | python3 -c "
+          import sys, json
+          data = json.load(sys.stdin)
+          deps = data.get('dependencies', [])
+          vulns = sum(len(d.get('vulns', [])) for d in deps)
+          print(vulns)
+          " 2>/dev/null || echo "0")
+            HIGH=$TOTAL
+          fi
+
+          echo "high_critical=$HIGH" >> "$GITHUB_OUTPUT"
+          echo "total=$TOTAL" >> "$GITHUB_OUTPUT"
+
+          if [ "$TOTAL" -gt 0 ]; then
+            echo "**Found $TOTAL vulnerability(ies):**" >> deps-report.md
+            echo '```' >> deps-report.md
+            uv run pip-audit 2>/dev/null | head -20 >> deps-report.md || true
+            echo '```' >> deps-report.md
+          else
+            echo "No known vulnerabilities found." >> deps-report.md
+          fi
+
+      # ── Tier 2: Secret Detection ──
+      - name: Secret detection
+        id: secrets
+        run: |
+          echo "## Secret Detection" > secrets-report.md
+          FOUND=0
+
+          KEYS=$(grep -rnE \
+            '(sk-[a-zA-Z0-9]{20,}|AIza[a-zA-Z0-9_-]{35}|AKIA[A-Z0-9]{16}|ghp_[a-zA-Z0-9]{36})' \
+            --include='*.py' --include='*.ts' --include='*.tsx' --include='*.js' \
+            --include='*.go' --include='*.yaml' --include='*.yml' \
+            . 2>/dev/null \
+            | grep -v node_modules | grep -v __pycache__ | grep -v .venv \
+            | grep -v '\.test\.' | grep -v 'test_' | grep -v '__tests__' \
+            | grep -v 'quality-gate' | grep -v 'ci\.yml' | grep -v 'security\.yml' \
+            || true)
+
+          if [ -n "$KEYS" ]; then
+            FOUND=$(echo "$KEYS" | wc -l)
+            echo "**CRITICAL: Possible hardcoded API keys found ($FOUND occurrences)**" >> secrets-report.md
+            echo '```' >> secrets-report.md
+            echo "$KEYS" | head -10 >> secrets-report.md
+            echo '```' >> secrets-report.md
+          else
+            echo "No hardcoded secrets detected." >> secrets-report.md
+          fi
+
+          echo "count=$FOUND" >> "$GITHUB_OUTPUT"
+
+      # ── Tier 3: SAST Patterns ──
+      - name: SAST pattern check
+        id: sast
+        run: |
+          echo "## SAST Patterns" > sast-report.md
+          FOUND=0
+
+          # eval() / exec() usage
+          EVALS=$(grep -rnE '\b(eval|exec)\s*\(' \
+            --include='*.py' \
+            . 2>/dev/null \
+            | grep -v __pycache__ | grep -v .venv \
+            | grep -v 'test_' | grep -v 'conftest' \
+            || true)
+
+          if [ -n "$EVALS" ]; then
+            COUNT=$(echo "$EVALS" | wc -l)
+            FOUND=$((FOUND + COUNT))
+            echo "**eval()/exec() usage ($COUNT occurrences):**" >> sast-report.md
+            echo '```' >> sast-report.md
+            echo "$EVALS" | head -5 >> sast-report.md
+            echo '```' >> sast-report.md
+          fi
+
+          # subprocess with shell=True
+          SHELL_TRUE=$(grep -rnE 'subprocess\.\w+\(.*shell\s*=\s*True' \
+            --include='*.py' \
+            . 2>/dev/null \
+            | grep -v __pycache__ | grep -v .venv \
+            | grep -v 'test_' | grep -v 'conftest' \
+            || true)
+
+          if [ -n "$SHELL_TRUE" ]; then
+            COUNT=$(echo "$SHELL_TRUE" | wc -l)
+            FOUND=$((FOUND + COUNT))
+            echo "**subprocess shell=True ($COUNT occurrences):**" >> sast-report.md
+            echo '```' >> sast-report.md
+            echo "$SHELL_TRUE" | head -5 >> sast-report.md
+            echo '```' >> sast-report.md
+          fi
+
+          # pickle deserialization
+          PICKLE=$(grep -rnE '\bpickle\.(load|loads)\b' \
+            --include='*.py' \
+            . 2>/dev/null \
+            | grep -v __pycache__ | grep -v .venv \
+            | grep -v 'test_' | grep -v 'conftest' \
+            || true)
+
+          if [ -n "$PICKLE" ]; then
+            COUNT=$(echo "$PICKLE" | wc -l)
+            FOUND=$((FOUND + COUNT))
+            echo "**pickle deserialization ($COUNT occurrences):**" >> sast-report.md
+            echo '```' >> sast-report.md
+            echo "$PICKLE" | head -5 >> sast-report.md
+            echo '```' >> sast-report.md
+          fi
+
+          if [ "$FOUND" -eq 0 ]; then
+            echo "No SAST patterns detected." >> sast-report.md
+          fi
+
+          echo "count=$FOUND" >> "$GITHUB_OUTPUT"
+
+      # ── Post Summary ──
+      - name: Post security report
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return 'Scan skipped.'; } };
+            const deps = read('deps-report.md');
+            const secrets = read('secrets-report.md');
+            const sast = read('sast-report.md');
+
+            const depsCount = '${{ steps.deps.outputs.high_critical }}' || '0';
+            const secretsCount = '${{ steps.secrets.outputs.count }}' || '0';
+            const sastCount = '${{ steps.sast.outputs.count }}' || '0';
+
+            const total = parseInt(depsCount) + parseInt(secretsCount) + parseInt(sastCount);
+            const status = total > 0 ? ':warning:' : ':white_check_mark:';
+
+            const body = [
+              `## ${status} Security Scan Summary`,
+              '',
+              '| Check | Findings |',
+              '|-------|----------|',
+              `| Dependencies (high/critical) | ${depsCount} |`,
+              `| Hardcoded Secrets | ${secretsCount} |`,
+              `| SAST Patterns | ${sastCount} |`,
+              '',
+              '---',
+              '',
+              deps,
+              '',
+              secrets,
+              '',
+              sast,
+              '',
+              '---',
+              '*Powered by rdi-dev-env security scanner*'
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body
+            });
+
+      # ── Optional: Fail on critical ──
+      - name: Fail on critical findings
+        if: env.BLOCK_ON_CRITICAL == 'true'
+        run: |
+          SECRETS="${{ steps.secrets.outputs.count }}"
+          DEPS="${{ steps.deps.outputs.high_critical }}"
+
+          if [ "$SECRETS" -gt 0 ] || [ "$DEPS" -gt 0 ]; then
+            echo "::error::Critical security findings detected (secrets: $SECRETS, deps high/critical: $DEPS)"
+            exit 1
+          fi

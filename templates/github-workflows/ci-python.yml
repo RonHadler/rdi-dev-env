@@ -1,0 +1,132 @@
+# CI Pipeline — Python/FastMCP
+# Copy to: .github/workflows/ci.yml
+#
+# PREREQUISITES:
+#   1. Python project using uv as package manager
+#   2. pyproject.toml with ruff, mypy, pytest configured
+#   3. Makefile with test, lint, type-check targets (optional)
+#
+# CUSTOMIZE: Update PYTHON_VERSION, COVERAGE_THRESHOLD, and mypy target path.
+
+name: CI Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.gitignore'
+  pull_request:
+    branches: [main, develop]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.gitignore'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: '3.12'
+  # <!-- CUSTOMIZE: minimum coverage % (set to 0 to disable) -->
+  COVERAGE_THRESHOLD: 80
+
+jobs:
+  # ── Lint ──────────────────────────────────────────────────────
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Format check
+        run: uv run ruff format --check .
+
+  # ── Type Check ────────────────────────────────────────────────
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Type check (strict)
+        # <!-- CUSTOMIZE: replace package_name with your Python package -->
+        run: uv run mypy <!-- CUSTOMIZE: package_name -->/ --strict
+
+  # ── Tests + Coverage ──────────────────────────────────────────
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Run tests with coverage
+        run: |
+          # <!-- CUSTOMIZE: replace package_name with your Python package -->
+          uv run pytest tests/ \
+            --cov=<!-- CUSTOMIZE: package_name --> \
+            --cov-report=term-missing \
+            --cov-report=json:coverage.json \
+            -v
+
+      - name: Enforce coverage threshold
+        if: env.COVERAGE_THRESHOLD != '0'
+        run: |
+          ACTUAL=$(python3 -c "
+          import json
+          with open('coverage.json') as f:
+              data = json.load(f)
+          print(int(data['totals']['percent_covered']))
+          ")
+          echo "Coverage: ${ACTUAL}% (threshold: ${{ env.COVERAGE_THRESHOLD }}%)"
+          if [ "$ACTUAL" -lt "${{ env.COVERAGE_THRESHOLD }}" ]; then
+            echo "::error::Coverage ${ACTUAL}% is below threshold ${{ env.COVERAGE_THRESHOLD }}%"
+            exit 1
+          fi
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.json
