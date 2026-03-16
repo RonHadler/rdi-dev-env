@@ -207,7 +207,7 @@ increment_attempts() {
   local tmp
   tmp=$(mktemp)
   jq --arg id "$task_id" \
-    '(.tasks[] | select(.id == $id)).attempts += 1' \
+    '(.tasks[] | select(.id == $id)).attempts |= ((. // 0) + 1)' \
     "$TASKS_FILE" > "$tmp" && mv "$tmp" "$TASKS_FILE"
 }
 
@@ -553,9 +553,9 @@ if [ "$DRY_RUN" = false ]; then
   if [ "$current_branch" != "$BRANCH_NAME" ]; then
     # Create branch if it doesn't exist, or switch to it
     if git rev-parse --verify "$BRANCH_NAME" &>/dev/null; then
-      git checkout "$BRANCH_NAME"
+      git checkout "$BRANCH_NAME" --
     else
-      git checkout -b "$BRANCH_NAME"
+      git checkout -b "$BRANCH_NAME" --
     fi
     log INFO "On branch: $BRANCH_NAME"
   fi
@@ -607,11 +607,19 @@ while [ $ITERATION -lt $MAX_ITERATIONS ]; do
   log INFO "Attempt $((TASK_ATTEMPTS + 1))/$TASK_MAX"
   log INFO "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-  # Dry run — just log
+  # Dry run — log all eligible tasks and exit
   if [ "$DRY_RUN" = true ]; then
     log INFO "[DRY RUN] Would execute task: $TASK_ID — $TASK_TITLE"
     log INFO "[DRY RUN] Test command: $(get_verification_field "$TASK_ID" "test_command")"
-    continue
+    # List remaining eligible tasks
+    local remaining_ids
+    remaining_ids=$(jq -r '.tasks[] | select(.status == "pending") | select(.id != "'"$TASK_ID"'") | .id' "$TASKS_FILE" 2>/dev/null)
+    for rid in $remaining_ids; do
+      local rtitle
+      rtitle=$(get_task_field "$rid" "title")
+      log INFO "[DRY RUN] Queued: $rid — $rtitle"
+    done
+    break
   fi
 
   # Mark in_progress and increment attempts
@@ -630,7 +638,7 @@ while [ $ITERATION -lt $MAX_ITERATIONS ]; do
 
   # Execute via Claude CLI
   log INFO "Sending task to Claude CLI..."
-  echo "$PROMPT" | claude -p 2>&1 || true
+  printf "%s\n" "$PROMPT" | claude -p 2>&1 || true
   log INFO "Claude CLI completed"
 
   # Run tests

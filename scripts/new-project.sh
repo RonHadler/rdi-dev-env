@@ -102,19 +102,23 @@ substitute_markers() {
     return
   fi
 
-  # Escape pipe characters in user inputs to avoid breaking sed delimiter
-  local safe_description="${PROJECT_DESCRIPTION//|/\\|}"
-  local safe_display_name="${PROJECT_DISPLAY_NAME//|/\\|}"
-  local safe_project_name="${PROJECT_NAME//|/\\|}"
+  # Escape | (sed delimiter) and & (sed special char) in user inputs
+  local safe_desc="${PROJECT_DESCRIPTION//|/\\|}"
+  safe_desc="${safe_desc//&/\\&}"
+  local safe_display="${PROJECT_DISPLAY_NAME//|/\\|}"
+  safe_display="${safe_display//&/\\&}"
+  local safe_name="${PROJECT_NAME//|/\\|}"
+  local safe_pkg="${PACKAGE_NAME//|/\\|}"
+  local safe_upper_pkg="${UPPER_PACKAGE_NAME//|/\\|}"
   local safe_gcp_project="${GCP_PROJECT_ID//|/\\|}"
   local safe_gcp_region="${GCP_REGION//|/\\|}"
 
   sed -i.bak \
-    -e "s|<!-- CUSTOMIZE: Project Name -->|$safe_display_name|g" \
-    -e "s|<!-- CUSTOMIZE: project-name -->|$safe_project_name|g" \
-    -e "s|<!-- CUSTOMIZE: package_name -->|$PACKAGE_NAME|g" \
-    -e "s|<!-- CUSTOMIZE: PACKAGE_NAME -->|$UPPER_PACKAGE_NAME|g" \
-    -e "s|<!-- CUSTOMIZE: description -->|$safe_description|g" \
+    -e "s|<!-- CUSTOMIZE: Project Name -->|$safe_display|g" \
+    -e "s|<!-- CUSTOMIZE: project-name -->|$safe_name|g" \
+    -e "s|<!-- CUSTOMIZE: package_name -->|$safe_pkg|g" \
+    -e "s|<!-- CUSTOMIZE: PACKAGE_NAME -->|$safe_upper_pkg|g" \
+    -e "s|<!-- CUSTOMIZE: description -->|$safe_desc|g" \
     -e "s|<!-- CUSTOMIZE: date -->|$(date +%Y-%m-%d)|g" \
     -e "s|<!-- CUSTOMIZE: GCP project ID -->|$safe_gcp_project|g" \
     -e "s|<!-- CUSTOMIZE: GCP region -->|$safe_gcp_region|g" \
@@ -402,8 +406,11 @@ fi
 # ── Install dependencies ─────────────────────────────────────
 echo -e "${BOLD}Installing dependencies...${NC}"
 if command -v uv &>/dev/null; then
-  uv sync 2>&1 | tail -5
-  echo -e "  ${GREEN}+${NC} Dependencies installed"
+  if uv sync 2>&1 | tail -5; then
+    echo -e "  ${GREEN}+${NC} Dependencies installed"
+  else
+    echo -e "  ${YELLOW}~${NC} uv sync failed — run manually"
+  fi
 else
   echo -e "  ${YELLOW}~${NC} uv not found — run 'uv sync' manually"
 fi

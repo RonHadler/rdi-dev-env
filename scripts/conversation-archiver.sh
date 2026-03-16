@@ -39,7 +39,7 @@ timestamp=$(date '+%Y%m%d-%H%M%S')
 session_prefix="${session_id:0:8}"
 archive_file="${archive_dir}/${timestamp}-${session_prefix}.jsonl"
 
-cp "$transcript_path" "$archive_file"
+cp -- "$transcript_path" "$archive_file"
 
 # Log stats
 msg_count=$(grep -c '"role":"assistant"' "$archive_file" 2>/dev/null || true)

@@ -65,7 +65,7 @@ count_messages_in_window() {
     c=$(grep '"role":"assistant"' "$f" 2>/dev/null | \
         grep -o '"timestamp":"[^"]*"' | \
         awk -F'"' -v cutoff="$cutoff_iso" '$4 >= cutoff {n++} END {print n+0}')
-    count=$((count + c))
+    count=$((count + ${c:-0}))
   done < <(find "$CLAUDE_DIR/projects" -name '*.jsonl' -mmin "-${window_minutes}" 2>/dev/null)
 
   echo "$count"
