@@ -22,7 +22,7 @@ permissions:
   issues: write
 
 env:
-  MAX_DIFF_BYTES: 51200  # 50KB max diff size
+  MAX_DIFF_BYTES: 512000  # 500KB max diff size
 
 jobs:
   gemini-assist:
@@ -63,7 +63,7 @@ jobs:
             const modelName = process.env.GEMINI_MODEL || 'gemini-2.5-pro';
             const model = genAI.getGenerativeModel({ model: modelName });
             const defaultBranch = process.env.DEFAULT_BRANCH || 'master';
-            const maxDiffBytes = parseInt(process.env.MAX_DIFF_BYTES) || 51200;
+            const maxDiffBytes = parseInt(process.env.MAX_DIFF_BYTES) || 512000;
 
             console.log('Using Gemini model: ' + modelName);
 
