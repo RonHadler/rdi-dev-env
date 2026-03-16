@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run ShellCheck on scripts
+        run: |
+          shellcheck --severity=warning scripts/*.sh tmux/tmux-dev.sh install.sh
+
+  yaml-lint:
+    name: YAML Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install yamllint
+        run: pipx install yamllint
+
+      - name: Lint workflow templates
+        run: |
+          shopt -s nullglob
+          files=(templates/github-workflows/*.yml .github/workflows/*.yml)
+          if [ ${#files[@]} -gt 0 ]; then
+            yamllint -d "{extends: default, rules: {line-length: {max: 200}, truthy: disable, comments-indentation: disable, document-start: disable, new-lines: disable}}" \
+              "${files[@]}"
+          fi
