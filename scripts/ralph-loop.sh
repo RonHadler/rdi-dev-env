@@ -612,10 +612,8 @@ while [ $ITERATION -lt $MAX_ITERATIONS ]; do
     log INFO "[DRY RUN] Would execute task: $TASK_ID — $TASK_TITLE"
     log INFO "[DRY RUN] Test command: $(get_verification_field "$TASK_ID" "test_command")"
     # List remaining eligible tasks
-    local remaining_ids
-    remaining_ids=$(jq -r '.tasks[] | select(.status == "pending") | select(.id != "'"$TASK_ID"'") | .id' "$TASKS_FILE" 2>/dev/null)
+    remaining_ids=$(jq -r --arg tid "$TASK_ID" '.tasks[] | select(.status == "pending") | select(.id != $tid) | .id' "$TASKS_FILE" 2>/dev/null)
     for rid in $remaining_ids; do
-      local rtitle
       rtitle=$(get_task_field "$rid" "title")
       log INFO "[DRY RUN] Queued: $rid — $rtitle"
     done
