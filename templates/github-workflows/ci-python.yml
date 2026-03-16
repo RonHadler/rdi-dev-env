@@ -81,7 +81,8 @@ jobs:
 
       - name: Type check (strict)
         # <!-- CUSTOMIZE: replace package_name with your Python package -->
-        run: uv run mypy <!-- CUSTOMIZE: package_name -->/ --strict
+        # CUSTOMIZE: replace package_name with your Python package
+        run: uv run mypy package_name/ --strict
 
   # ── Tests + Coverage ──────────────────────────────────────────
   test:
