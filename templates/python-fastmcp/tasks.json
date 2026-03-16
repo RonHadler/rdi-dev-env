@@ -1,0 +1,105 @@
+{
+  "version": "1.0",
+  "project": "<!-- CUSTOMIZE: project-name -->",
+  "created": "<!-- CUSTOMIZE: date -->",
+  "tasks": [
+    {
+      "id": "TASK-001",
+      "status": "completed",
+      "priority": 1,
+      "title": "Scaffold project structure",
+      "description": "Project scaffolded by new-project.sh. Coordinator, config, server, and initial test are in place.",
+      "blocked_by": [],
+      "story_ref": "",
+      "adr_ref": "ADR-001",
+      "verification": {
+        "test_command": "uv run pytest tests/ -v",
+        "expected_files": [
+          "<!-- CUSTOMIZE: package_name -->/coordinator.py",
+          "<!-- CUSTOMIZE: package_name -->/config.py",
+          "<!-- CUSTOMIZE: package_name -->/server.py"
+        ],
+        "check_patterns": [
+          "from fastmcp import FastMCP"
+        ]
+      },
+      "commit_type": "feat",
+      "attempts": 1,
+      "max_attempts": 3,
+      "last_error": "",
+      "completed_at": "<!-- CUSTOMIZE: date -->"
+    },
+    {
+      "id": "TASK-002",
+      "status": "pending",
+      "priority": 2,
+      "title": "Add health check tool and /health custom route",
+      "description": "Create tools/health.py with a health_check MCP tool that returns server status, version, and uptime. Also add a GET /health custom route on the FastMCP server for Cloud Run liveness/readiness probes. Write tests first in tests/tools/test_health.py. The health tool should return a Pydantic model (HealthStatus) defined in models/schemas.py. The /health route should return JSON {\"status\": \"ok\"}.",
+      "blocked_by": ["TASK-001"],
+      "story_ref": "",
+      "adr_ref": "",
+      "verification": {
+        "test_command": "uv run pytest tests/ -v",
+        "expected_files": [
+          "<!-- CUSTOMIZE: package_name -->/tools/health.py",
+          "<!-- CUSTOMIZE: package_name -->/models/schemas.py",
+          "tests/tools/test_health.py"
+        ],
+        "check_patterns": [
+          "@mcp.tool",
+          "HealthStatus"
+        ]
+      },
+      "commit_type": "feat",
+      "attempts": 0,
+      "max_attempts": 3,
+      "last_error": "",
+      "completed_at": ""
+    },
+    {
+      "id": "TASK-003",
+      "status": "pending",
+      "priority": 3,
+      "title": "Add config validation and environment tests",
+      "description": "Write comprehensive tests for config.py in tests/test_config.py. Test default values, environment variable overrides (using monkeypatch), transport type validation, and the settings singleton. Ensure all Settings fields have sensible defaults and that invalid transport types raise validation errors.",
+      "blocked_by": ["TASK-001"],
+      "story_ref": "",
+      "adr_ref": "",
+      "verification": {
+        "test_command": "uv run pytest tests/test_config.py -v",
+        "expected_files": [
+          "tests/test_config.py"
+        ],
+        "check_patterns": [
+          "class TestConfig",
+          "monkeypatch"
+        ]
+      },
+      "commit_type": "test",
+      "attempts": 0,
+      "max_attempts": 3,
+      "last_error": "",
+      "completed_at": ""
+    },
+    {
+      "id": "TASK-004",
+      "status": "pending",
+      "priority": 4,
+      "title": "Pass lint, format, and type checks cleanly",
+      "description": "Run 'make lint', 'make format', and 'make type-check'. Fix any ruff warnings, formatting issues, or mypy errors across the entire codebase. All three commands must exit with code 0. Do not change behavior — only fix style, types, and lint issues.",
+      "blocked_by": ["TASK-002", "TASK-003"],
+      "story_ref": "",
+      "adr_ref": "",
+      "verification": {
+        "test_command": "uv run ruff check . && uv run mypy <!-- CUSTOMIZE: package_name -->/ && uv run pytest tests/ -v",
+        "expected_files": [],
+        "check_patterns": []
+      },
+      "commit_type": "refactor",
+      "attempts": 0,
+      "max_attempts": 3,
+      "last_error": "",
+      "completed_at": ""
+    }
+  ]
+}
