@@ -30,7 +30,7 @@ jobs:
           node-version: '20'
 
       - name: Install Gemini SDK
-        run: npm install @google/generative-ai
+        run: npm install --no-save --no-audit --ignore-scripts @google/generative-ai
 
       - name: Extract PR context
         id: pr-context
@@ -89,6 +89,12 @@ jobs:
           printf "%s" "$DIFF" > filtered-diff.txt
           echo "empty=false" >> "$GITHUB_OUTPUT"
 
+      - name: Extract base standards
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          git show "origin/${BASE_REF}:GEMINI.md" > BASE_GEMINI.md 2>/dev/null || true
+
       - name: Generate code review
         if: steps.diff.outputs.empty != 'true'
         id: review
@@ -96,6 +102,8 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
         run: |
+          # Clear any attacker-controlled severity.json from the workspace
+          rm -f severity.json
           cat > review.js << 'SCRIPT'
           const { GoogleGenerativeAI } = require('@google/generative-ai');
           const fs = require('fs');
@@ -107,11 +115,12 @@ jobs:
 
             console.log('Using Gemini model: ' + modelName);
 
+            // Read standards from trusted base branch (not PR workspace)
             let standards = '';
             try {
-              standards = fs.readFileSync('GEMINI.md', 'utf8');
+              standards = fs.readFileSync('BASE_GEMINI.md', 'utf8');
             } catch (e) {
-              console.log('Warning: GEMINI.md not found, using default review standards');
+              console.log('Warning: GEMINI.md not found on base branch, using default review standards');
             }
 
             let prContext = {};
