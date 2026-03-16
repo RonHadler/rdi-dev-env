@@ -34,5 +34,6 @@ jobs:
 
       - name: Lint workflow templates
         run: |
+          shopt -s nullglob
           yamllint -d "{extends: default, rules: {line-length: {max: 200}, truthy: disable, comments-indentation: disable, document-start: disable, new-lines: disable}}" \
             templates/github-workflows/*.yml .github/workflows/*.yml

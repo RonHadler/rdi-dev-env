@@ -217,7 +217,7 @@ jobs:
         run: |
           if [ -f severity.json ]; then
             CRITICAL=$(node -e "console.log(JSON.parse(require('fs').readFileSync('severity.json','utf8')).critical)")
-            if [ "$CRITICAL" -gt 0 ]; then
+            if [[ "$CRITICAL" =~ ^[0-9]+$ ]] && [ "$CRITICAL" -gt 0 ]; then
               echo "::error::Gemini found $CRITICAL critical issue(s). Review the PR comment for details."
               exit 1
             fi
