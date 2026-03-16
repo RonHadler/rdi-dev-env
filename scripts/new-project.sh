@@ -102,14 +102,16 @@ substitute_markers() {
     return
   fi
 
-  sed -i \
+  sed -i.bak \
     -e "s|<!-- CUSTOMIZE: Project Name -->|$PROJECT_DISPLAY_NAME|g" \
     -e "s|<!-- CUSTOMIZE: project-name -->|$PROJECT_NAME|g" \
     -e "s|<!-- CUSTOMIZE: package_name -->|$PACKAGE_NAME|g" \
     -e "s|<!-- CUSTOMIZE: PACKAGE_NAME -->|$UPPER_PACKAGE_NAME|g" \
     -e "s|<!-- CUSTOMIZE: description -->|$PROJECT_DESCRIPTION|g" \
     -e "s|<!-- CUSTOMIZE: date -->|$(date +%Y-%m-%d)|g" \
-    "$file"
+    -e "s|<!-- CUSTOMIZE: GCP project ID -->|$GCP_PROJECT_ID|g" \
+    -e "s|<!-- CUSTOMIZE: GCP region -->|$GCP_REGION|g" \
+    "$file" && rm -f "${file}.bak"
 }
 
 # ══════════════════════════════════════════════════════════════
@@ -191,7 +193,6 @@ if [ "$GCP_INPUT" != "skip" ]; then
   GCP_PROJECT_ID="$GCP_INPUT"
   GCP_REGION=$(prompt_text "GCP region" "us-central1")
 fi
-export GCP_PROJECT_ID GCP_REGION  # Used by deploy workflow templates
 echo ""
 
 # ── 7. Create tasks.json ────────────────────────────────────

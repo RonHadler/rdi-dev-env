@@ -201,7 +201,7 @@ if [ -f "$SETTINGS_FILE" ]; then
     # jq available — proper JSON merge
     tmp=$(mktemp)
     jq --argjson hooks "$(echo "$HOOKS_CONFIG" | jq '.hooks')" \
-      '.hooks = $hooks' "$SETTINGS_FILE" > "$tmp" && mv "$tmp" "$SETTINGS_FILE"
+      '.hooks = ((.hooks // {}) + $hooks)' "$SETTINGS_FILE" > "$tmp" && mv "$tmp" "$SETTINGS_FILE"
     echo -e "  ${GREEN}+${NC} Hooks merged into $SETTINGS_FILE (via jq)"
     ((INSTALLED++)) || true
   elif command -v node &>/dev/null; then
@@ -213,7 +213,7 @@ if [ -f "$SETTINGS_FILE" ]; then
       const fs = require('fs');
       const settings = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'));
       const hooks = JSON.parse(process.argv[2]);
-      settings.hooks = hooks.hooks;
+      settings.hooks = { ...(settings.hooks || {}), ...hooks.hooks };
       fs.writeFileSync(process.argv[1], JSON.stringify(settings, null, 2) + '\n');
     " "$win_settings" "$hooks_json"
     echo -e "  ${GREEN}+${NC} Hooks merged into $SETTINGS_FILE (via node)"

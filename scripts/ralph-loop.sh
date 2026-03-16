@@ -350,7 +350,7 @@ run_tests() {
 
   log INFO "Running tests: $test_cmd"
   local output
-  output=$(eval "$test_cmd" 2>&1)
+  output=$(bash -c "$test_cmd" 2>&1)
   local exit_code=$?
 
   if [ $exit_code -eq 0 ]; then

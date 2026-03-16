@@ -39,7 +39,7 @@ while IFS= read -r line; do
   if [ -n "$text" ]; then
     # Truncate long messages
     truncated="${text:0:200}"
-    user_msgs="${user_msgs}- ${truncated}\n"
+    user_msgs="$(printf '%s- %s\n' "$user_msgs" "$truncated")"
   fi
 done < <(grep '"role":"user"' "$latest" 2>/dev/null | tail -15)
 
