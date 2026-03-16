@@ -16,9 +16,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install ShellCheck
-        run: sudo apt-get install -y shellcheck
-
       - name: Run ShellCheck on scripts
         run: |
           shellcheck --severity=warning scripts/*.sh tmux/tmux-dev.sh install.sh
@@ -30,10 +27,13 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install yamllint
-        run: pip install yamllint
+        run: pipx install yamllint
 
       - name: Lint workflow templates
         run: |
           shopt -s nullglob
-          yamllint -d "{extends: default, rules: {line-length: {max: 200}, truthy: disable, comments-indentation: disable, document-start: disable, new-lines: disable}}" \
-            templates/github-workflows/*.yml .github/workflows/*.yml
+          files=(templates/github-workflows/*.yml .github/workflows/*.yml)
+          if [ ${#files[@]} -gt 0 ]; then
+            yamllint -d "{extends: default, rules: {line-length: {max: 200}, truthy: disable, comments-indentation: disable, document-start: disable, new-lines: disable}}" \
+              "${files[@]}"
+          fi
