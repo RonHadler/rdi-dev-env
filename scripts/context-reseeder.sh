@@ -15,8 +15,8 @@ set -uo pipefail
 # Read hook input from stdin
 input=$(cat)
 
-# Parse cwd
-cwd=$(echo "$input" | grep -o '"cwd":"[^"]*"' | head -1 | cut -d'"' -f4)
+# Parse cwd using jq for safe JSON handling
+cwd=$(echo "$input" | jq -r '.cwd // empty')
 
 if [ -z "$cwd" ]; then
   exit 0
@@ -35,7 +35,7 @@ fi
 # Recent user messages (last 15, truncated)
 user_msgs=""
 while IFS= read -r line; do
-  text=$(echo "$line" | grep -o '"text":"[^"]*"' | head -1 | cut -d'"' -f4)
+  text=$(echo "$line" | jq -r '.text // empty' 2>/dev/null)
   if [ -n "$text" ]; then
     # Truncate long messages
     truncated="${text:0:200}"
@@ -62,15 +62,10 @@ ${task_refs:-None}
 
 Full archive: ${latest}"
 
-# Escape for JSON: replace newlines with \n, escape quotes
-json_summary=$(echo "$summary" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
-
-# Return as additionalContext
-cat <<EOF
-{
-  "hookSpecificOutput": {
-    "hookEventName": "SessionStart",
-    "additionalContext": "${json_summary}"
+# Return as additionalContext using jq for safe JSON encoding
+jq -n --arg ctx "$summary" '{
+  hookSpecificOutput: {
+    hookEventName: "SessionStart",
+    additionalContext: $ctx
   }
-}
-EOF
+}'

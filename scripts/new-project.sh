@@ -103,12 +103,12 @@ substitute_markers() {
   fi
 
   sed -i \
-    -e "s/<!-- CUSTOMIZE: Project Name -->/$PROJECT_DISPLAY_NAME/g" \
-    -e "s/<!-- CUSTOMIZE: project-name -->/$PROJECT_NAME/g" \
-    -e "s/<!-- CUSTOMIZE: package_name -->/$PACKAGE_NAME/g" \
-    -e "s/<!-- CUSTOMIZE: PACKAGE_NAME -->/$UPPER_PACKAGE_NAME/g" \
-    -e "s/<!-- CUSTOMIZE: description -->/$PROJECT_DESCRIPTION/g" \
-    -e "s/<!-- CUSTOMIZE: date -->/$(date +%Y-%m-%d)/g" \
+    -e "s|<!-- CUSTOMIZE: Project Name -->|$PROJECT_DISPLAY_NAME|g" \
+    -e "s|<!-- CUSTOMIZE: project-name -->|$PROJECT_NAME|g" \
+    -e "s|<!-- CUSTOMIZE: package_name -->|$PACKAGE_NAME|g" \
+    -e "s|<!-- CUSTOMIZE: PACKAGE_NAME -->|$UPPER_PACKAGE_NAME|g" \
+    -e "s|<!-- CUSTOMIZE: description -->|$PROJECT_DESCRIPTION|g" \
+    -e "s|<!-- CUSTOMIZE: date -->|$(date +%Y-%m-%d)|g" \
     "$file"
 }
 
@@ -191,6 +191,7 @@ if [ "$GCP_INPUT" != "skip" ]; then
   GCP_PROJECT_ID="$GCP_INPUT"
   GCP_REGION=$(prompt_text "GCP region" "us-central1")
 fi
+export GCP_PROJECT_ID GCP_REGION  # Used by deploy workflow templates
 echo ""
 
 # ── 7. Create tasks.json ────────────────────────────────────
@@ -378,7 +379,7 @@ echo ""
 # POST-SCAFFOLD
 # ══════════════════════════════════════════════════════════════
 
-cd "$TARGET_DIR"
+cd "$TARGET_DIR" || exit 1
 
 # ── Ensure .sdlc/ is in .gitignore (all stacks) ─────────────
 if [ -f "$TARGET_DIR/.gitignore" ]; then

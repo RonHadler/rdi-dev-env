@@ -51,7 +51,6 @@ STOP_FILE=""
 ITERATION=0
 COMPLETED=0
 FAILED=0
-SKIPPED=0
 
 # ── Usage ────────────────────────────────────────────────────
 usage() {
@@ -193,13 +192,13 @@ update_task_status() {
   tmp=$(mktemp)
 
   local jq_filter
-  jq_filter="(.tasks[] | select(.id == \"$task_id\")).status = \"$status\""
+  jq_filter='(.tasks[] | select(.id == $id)).status = $status'
 
   if [ -n "$extra_updates" ]; then
     jq_filter="$jq_filter | $extra_updates"
   fi
 
-  jq "$jq_filter" "$TASKS_FILE" > "$tmp" && mv "$tmp" "$TASKS_FILE"
+  jq --arg id "$task_id" --arg status "$status" "$jq_filter" "$TASKS_FILE" > "$tmp" && mv "$tmp" "$TASKS_FILE"
 }
 
 # Increment attempts counter
@@ -598,7 +597,9 @@ while [ $ITERATION -lt $MAX_ITERATIONS ]; do
 
   TASK_TITLE=$(get_task_field "$TASK_ID" "title")
   TASK_ATTEMPTS=$(get_task_field "$TASK_ID" "attempts")
+  TASK_ATTEMPTS="${TASK_ATTEMPTS:-0}"
   TASK_MAX=$(get_task_field "$TASK_ID" "max_attempts")
+  TASK_MAX="${TASK_MAX:-3}"
 
   echo ""
   log INFO "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -629,7 +630,7 @@ while [ $ITERATION -lt $MAX_ITERATIONS ]; do
 
   # Execute via Claude CLI
   log INFO "Sending task to Claude CLI..."
-  CLAUDE_OUTPUT=$(echo "$PROMPT" | claude -p 2>&1) || true
+  echo "$PROMPT" | claude -p 2>&1 || true
   log INFO "Claude CLI completed"
 
   # Run tests

@@ -15,10 +15,10 @@ set -uo pipefail
 # Read hook input from stdin
 input=$(cat)
 
-# Parse fields (no jq — use grep+cut)
-transcript_path=$(echo "$input" | grep -o '"transcript_path":"[^"]*"' | head -1 | cut -d'"' -f4)
-session_id=$(echo "$input" | grep -o '"session_id":"[^"]*"' | head -1 | cut -d'"' -f4)
-cwd=$(echo "$input" | grep -o '"cwd":"[^"]*"' | head -1 | cut -d'"' -f4)
+# Parse fields using jq for safe JSON handling
+transcript_path=$(echo "$input" | jq -r '.transcript_path // empty')
+session_id=$(echo "$input" | jq -r '.session_id // empty')
+cwd=$(echo "$input" | jq -r '.cwd // empty')
 
 # Validate required fields
 if [ -z "$transcript_path" ] || [ -z "$cwd" ]; then

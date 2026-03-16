@@ -44,7 +44,6 @@ WINDOW_MINUTES=300  # 5 hours
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
-CYAN='\033[0;36m'
 DIM='\033[2m'
 BOLD='\033[1m'
 NC='\033[0m'
@@ -116,7 +115,6 @@ compute_stats() {
   STAT_EFFECTIVE="$effective_limit"
   STAT_REMAINING="$remaining"
   STAT_PCT_USED="$pct_used"
-  STAT_PCT_EFFECTIVE="$pct_of_effective"
   STAT_REMAINING_PCT="$remaining_pct"
   STAT_STATUS="$status"
   STAT_EXIT_CODE="$exit_code"

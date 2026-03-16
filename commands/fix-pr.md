@@ -1,7 +1,13 @@
 ---
 description: Auto-fix PR review comments (mechanical fixes + architectural triage)
 argument-hint: "[PR number]"
-allowed-tools: Bash(git:*, gh:*), Read, Glob, Grep, Edit, Write
+allowed-tools:
+  - "Bash(git:*, gh:*)"
+  - Read
+  - Glob
+  - Grep
+  - Edit
+  - Write
 ---
 
 # Fix PR Review Comments
