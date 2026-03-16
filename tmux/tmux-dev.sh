@@ -11,7 +11,7 @@
 #   bash tmux-dev.sh [project-path] [session-name]
 #
 # Examples:
-#   bash tmux-dev.sh /mnt/c/Dev/rdi-novusiq elevateai
+#   bash tmux-dev.sh /mnt/c/Dev/rdi-elevateai elevateai
 #   bash tmux-dev.sh /mnt/c/Dev/rdi-argus-mcp argus
 #   bash tmux-dev.sh .                           # current dir, auto-named
 #
