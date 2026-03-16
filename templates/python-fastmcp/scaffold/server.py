@@ -9,9 +9,7 @@ from <!-- CUSTOMIZE: package_name -->.coordinator import mcp
 logger = logging.getLogger(__name__)
 # Import tool modules to trigger @mcp.tool() registration
 # <!-- CUSTOMIZE: Add tool imports here, e.g.:
-# from <!-- CUSTOMIZE: package_name -->.tools import health  # noqa: E402, F401
-# isort: on
-# fmt: on
+# from <!-- CUSTOMIZE: package_name -->.tools import health  # noqa: F401
 
 
 # Register health endpoint on FastMCP server

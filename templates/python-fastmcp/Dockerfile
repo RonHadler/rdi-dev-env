@@ -12,9 +12,9 @@ ENV PYTHONUNBUFFERED=1
 RUN uv sync --no-dev
 
 # Run as non-root user
-RUN useradd -m appuser
+RUN useradd -m appuser && chown -R appuser:appuser /app
 USER appuser
 
 EXPOSE ${PORT:-8000}
 
-CMD ["uv", "run", "python", "-m", "<!-- CUSTOMIZE: package_name -->.server"]
+CMD ["uv", "run", "--no-sync", "python", "-m", "<!-- CUSTOMIZE: package_name -->.server"]
