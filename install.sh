@@ -211,11 +211,12 @@ if [ -f "$SETTINGS_FILE" ]; then
     hooks_json=$(echo "$HOOKS_CONFIG" | tr -d '\n')
     node -e "
       const fs = require('fs');
-      const settings = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'));
+      const filePath = process.argv[1];
+      const settings = JSON.parse(fs.readFileSync(filePath, 'utf8'));
       const hooks = JSON.parse(process.argv[2]);
       settings.hooks = { ...(settings.hooks || {}), ...hooks.hooks };
-      fs.writeFileSync(process.argv[1], JSON.stringify(settings, null, 2) + '\n');
-    " "$win_settings" "$hooks_json"
+      fs.writeFileSync(filePath, JSON.stringify(settings, null, 2) + '\n');
+    " -- "$win_settings" "$hooks_json"
     echo -e "  ${GREEN}+${NC} Hooks merged into $SETTINGS_FILE (via node)"
     ((INSTALLED++)) || true
   else

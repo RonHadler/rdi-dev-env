@@ -42,8 +42,10 @@ archive_file="${archive_dir}/${timestamp}-${session_prefix}.jsonl"
 cp "$transcript_path" "$archive_file"
 
 # Log stats
-msg_count=$(grep -c '"role":"assistant"' "$archive_file" 2>/dev/null || echo 0)
-user_count=$(grep -c '"role":"user"' "$archive_file" 2>/dev/null || echo 0)
+msg_count=$(grep -c '"role":"assistant"' "$archive_file" 2>/dev/null || true)
+[ -z "$msg_count" ] && msg_count=0
+user_count=$(grep -c '"role":"user"' "$archive_file" 2>/dev/null || true)
+[ -z "$user_count" ] && user_count=0
 file_size=$(wc -c < "$archive_file" 2>/dev/null | tr -d ' ')
 
 echo "Archived conversation: ${msg_count} assistant + ${user_count} user messages (${file_size} bytes) -> ${archive_file}" >&2

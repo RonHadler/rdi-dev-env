@@ -82,11 +82,11 @@ while [[ $# -gt 0 ]]; do
   case $1 in
     --dry-run)       DRY_RUN=true; shift ;;
     --once)          RUN_ONCE=true; shift ;;
-    --max-iterations) MAX_ITERATIONS="$2"; shift 2 ;;
+    --max-iterations) MAX_ITERATIONS="${2:?--max-iterations requires a value}"; shift 2 ;;
     --no-pr)         CREATE_PR=false; shift ;;
     --usage-check)   USAGE_CHECK=true; shift ;;
     --no-usage-check) USAGE_CHECK=false; shift ;;
-    --branch)        BRANCH_NAME="$2"; shift 2 ;;
+    --branch)        BRANCH_NAME="${2:?--branch requires a value}"; shift 2 ;;
     -h|--help)       usage ;;
     -*)              echo -e "${RED}Unknown option: $1${NC}"; usage ;;
     *)               TASKS_FILE="$1"; shift ;;

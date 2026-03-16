@@ -102,12 +102,16 @@ substitute_markers() {
     return
   fi
 
+  # Escape pipe characters in user inputs to avoid breaking sed delimiter
+  local safe_description="${PROJECT_DESCRIPTION//|/\\|}"
+  local safe_display_name="${PROJECT_DISPLAY_NAME//|/\\|}"
+
   sed -i.bak \
-    -e "s|<!-- CUSTOMIZE: Project Name -->|$PROJECT_DISPLAY_NAME|g" \
+    -e "s|<!-- CUSTOMIZE: Project Name -->|$safe_display_name|g" \
     -e "s|<!-- CUSTOMIZE: project-name -->|$PROJECT_NAME|g" \
     -e "s|<!-- CUSTOMIZE: package_name -->|$PACKAGE_NAME|g" \
     -e "s|<!-- CUSTOMIZE: PACKAGE_NAME -->|$UPPER_PACKAGE_NAME|g" \
-    -e "s|<!-- CUSTOMIZE: description -->|$PROJECT_DESCRIPTION|g" \
+    -e "s|<!-- CUSTOMIZE: description -->|$safe_description|g" \
     -e "s|<!-- CUSTOMIZE: date -->|$(date +%Y-%m-%d)|g" \
     -e "s|<!-- CUSTOMIZE: GCP project ID -->|$GCP_PROJECT_ID|g" \
     -e "s|<!-- CUSTOMIZE: GCP region -->|$GCP_REGION|g" \
@@ -134,8 +138,8 @@ fi
 
 PACKAGE_NAME=$(to_snake_case "$PROJECT_NAME")
 UPPER_PACKAGE_NAME=$(to_upper_snake_case "$PROJECT_NAME")
-# Generate display name: rdi-my-mcp -> RDI My MCP
-PROJECT_DISPLAY_NAME=$(echo "$PROJECT_NAME" | sed 's/-/ /g' | sed 's/\b\(.\)/\u\1/g')
+# Generate display name: rdi-my-mcp -> Rdi My Mcp
+PROJECT_DISPLAY_NAME=$(echo "$PROJECT_NAME" | sed 's/-/ /g' | awk '{for(i=1;i<=NF;i++) $i=toupper(substr($i,1,1)) substr($i,2)}1')
 
 echo ""
 
