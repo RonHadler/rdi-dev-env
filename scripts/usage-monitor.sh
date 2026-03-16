@@ -88,11 +88,6 @@ compute_stats() {
     pct_used=$(( used * 100 / USAGE_5H_LIMIT ))
   fi
 
-  local pct_of_effective=0
-  if [ "$effective_limit" -gt 0 ]; then
-    pct_of_effective=$(( (effective_limit - remaining) * 100 / effective_limit ))
-  fi
-
   local remaining_pct=0
   if [ "$effective_limit" -gt 0 ]; then
     remaining_pct=$(( remaining * 100 / effective_limit ))
