@@ -26,7 +26,7 @@ permissions:
   issues: write
 
 env:
-  MAX_DIFF_BYTES: 153600          # 150KB max diff size sent to Gemini
+  MAX_DIFF_BYTES: 512000          # 500KB max diff size sent to Gemini
   # <!-- CUSTOMIZE: Set to 'true' to fail the workflow on critical findings -->
   BLOCK_ON_CRITICAL: 'false'
 
