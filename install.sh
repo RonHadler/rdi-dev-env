@@ -14,6 +14,9 @@
 #   2. Symlinks tmux/tmux.conf -> ~/.tmux.conf
 #   3. Symlinks commands/*.md -> ~/.claude/commands/
 #   4. Symlinks skills/*/ -> ~/.claude/skills/
+#   5. Symlinks scripts to ~/.local/bin/ as rdi-ralph-loop, rdi-new-project, etc.
+#   6. Configures Claude Code hooks (PreCompact archiver, SessionStart reseeder)
+#   7. Sets up global gitignore for .sdlc/conversations/
 #
 
 set -euo pipefail
@@ -47,7 +50,7 @@ link_file() {
 
   if [ ! -e "$src" ]; then
     echo -e "  ${RED}x${NC} $name — source not found: $src"
-    ((SKIPPED++))
+    ((SKIPPED++)) || true
     return
   fi
 
@@ -63,7 +66,7 @@ link_file() {
 
     if [ "$current_target" = "$src_resolved" ]; then
       echo -e "  ${DIM}-${NC} $name — already linked"
-      ((SKIPPED++))
+      ((SKIPPED++)) || true
       return
     fi
 
@@ -72,7 +75,7 @@ link_file() {
     backup="${dest}.backup.$(date +%Y%m%d-%H%M%S)"
     mv "$dest" "$backup"
     echo -e "  ${YELLOW}~${NC} $name — backed up to $(basename "$backup")"
-    ((BACKED_UP++))
+    ((BACKED_UP++)) || true
   fi
 
   # Create parent directory if needed
@@ -81,7 +84,7 @@ link_file() {
   # Create symlink
   ln -s "$src" "$dest"
   echo -e "  ${GREEN}+${NC} $name -> $dest"
-  ((INSTALLED++))
+  ((INSTALLED++)) || true
 }
 
 # ══════════════════════════════════════════════════════════════
@@ -117,6 +120,149 @@ for skill_dir in "$SCRIPT_DIR"/skills/*/; do
     link_file "$skill_dir" "$CLAUDE_DIR/skills/$skill_name" "$skill_name/"
   fi
 done
+echo ""
+
+# ══════════════════════════════════════════════════════════════
+# 4. CLI scripts (symlinked to ~/.local/bin/)
+# ══════════════════════════════════════════════════════════════
+echo -e "${BOLD}CLI scripts${NC}"
+
+LOCAL_BIN="$HOME/.local/bin"
+mkdir -p "$LOCAL_BIN"
+
+# Map script files to their global command names
+declare -A SCRIPT_MAP=(
+  ["scripts/ralph-loop.sh"]="rdi-ralph-loop"
+  ["scripts/new-project.sh"]="rdi-new-project"
+  ["scripts/quality-gate.sh"]="rdi-quality-gate"
+  ["scripts/usage-monitor.sh"]="rdi-usage-monitor"
+  ["scripts/conversation-archiver.sh"]="rdi-conversation-archiver"
+  ["scripts/context-reseeder.sh"]="rdi-context-reseeder"
+)
+
+for script in "${!SCRIPT_MAP[@]}"; do
+  cmd_name="${SCRIPT_MAP[$script]}"
+  src="$SCRIPT_DIR/$script"
+  dest="$LOCAL_BIN/$cmd_name"
+  if [ -f "$src" ]; then
+    chmod +x "$src"
+    link_file "$src" "$dest" "$cmd_name"
+  fi
+done
+
+# Check if ~/.local/bin is on PATH
+if ! echo "$PATH" | grep -q "$LOCAL_BIN"; then
+  echo ""
+  echo -e "  ${YELLOW}Note:${NC} Add ~/.local/bin to your PATH:"
+  echo -e "  ${DIM}echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc${NC}"
+fi
+echo ""
+
+# ══════════════════════════════════════════════════════════════
+# 5. Claude Code hooks (user-level settings.json)
+# ══════════════════════════════════════════════════════════════
+echo -e "${BOLD}Claude Code hooks${NC}"
+
+SETTINGS_FILE="$CLAUDE_DIR/settings.json"
+
+# Build the hooks config we want
+HOOKS_CONFIG='{
+  "hooks": {
+    "PreCompact": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"'"$LOCAL_BIN"'/rdi-conversation-archiver\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"'"$LOCAL_BIN"'/rdi-context-reseeder\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}'
+
+# Merge hooks into existing settings.json (or create it)
+if [ -f "$SETTINGS_FILE" ]; then
+  if command -v jq &>/dev/null; then
+    # jq available — proper JSON merge
+    tmp=$(mktemp)
+    jq --argjson hooks "$(echo "$HOOKS_CONFIG" | jq '.hooks')" \
+      '.hooks = ((.hooks // {}) + $hooks)' "$SETTINGS_FILE" > "$tmp" && mv "$tmp" "$SETTINGS_FILE"
+    echo -e "  ${GREEN}+${NC} Hooks merged into $SETTINGS_FILE (via jq)"
+    ((INSTALLED++)) || true
+  elif command -v node &>/dev/null; then
+    # Node available — use it for JSON merge
+    # Convert Git Bash path to Windows path for Node
+    win_settings=$(cygpath -w "$SETTINGS_FILE" 2>/dev/null || echo "$SETTINGS_FILE")
+    hooks_json=$(echo "$HOOKS_CONFIG" | tr -d '\n')
+    node -e "
+      const fs = require('fs');
+      const filePath = process.argv[1];
+      const settings = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+      const hooks = JSON.parse(process.argv[2]);
+      settings.hooks = { ...(settings.hooks || {}), ...hooks.hooks };
+      fs.writeFileSync(filePath, JSON.stringify(settings, null, 2) + '\n');
+    " -- "$win_settings" "$hooks_json"
+    echo -e "  ${GREEN}+${NC} Hooks merged into $SETTINGS_FILE (via node)"
+    ((INSTALLED++)) || true
+  else
+    echo -e "  ${YELLOW}~${NC} Neither jq nor node found — hooks not configured (add manually)"
+    ((SKIPPED++)) || true
+  fi
+else
+  mkdir -p "$CLAUDE_DIR"
+  echo "$HOOKS_CONFIG" > "$SETTINGS_FILE"
+  echo -e "  ${GREEN}+${NC} Created $SETTINGS_FILE with hooks"
+  ((INSTALLED++)) || true
+fi
+echo ""
+
+# ══════════════════════════════════════════════════════════════
+# 6. Global gitignore (.sdlc/conversations/)
+# ══════════════════════════════════════════════════════════════
+echo -e "${BOLD}Global gitignore${NC}"
+
+GLOBAL_GITIGNORE="$HOME/.gitignore_global"
+
+# Ensure file exists
+touch "$GLOBAL_GITIGNORE"
+
+# Add .sdlc/conversations/ if not already present
+if ! grep -qF '.sdlc/conversations/' "$GLOBAL_GITIGNORE" 2>/dev/null; then
+  echo "" >> "$GLOBAL_GITIGNORE"
+  echo "# SDLC pipeline conversation archives (rdi-dev-env)" >> "$GLOBAL_GITIGNORE"
+  echo ".sdlc/conversations/" >> "$GLOBAL_GITIGNORE"
+  echo -e "  ${GREEN}+${NC} Added .sdlc/conversations/ to $GLOBAL_GITIGNORE"
+  ((INSTALLED++)) || true
+else
+  echo -e "  ${DIM}-${NC} .sdlc/conversations/ already in $GLOBAL_GITIGNORE"
+  ((SKIPPED++)) || true
+fi
+
+# Ensure git uses the global gitignore
+current_excludes=$(git config --global core.excludesfile 2>/dev/null || echo "")
+if [ "$current_excludes" != "$GLOBAL_GITIGNORE" ]; then
+  git config --global core.excludesfile "$GLOBAL_GITIGNORE"
+  echo -e "  ${GREEN}+${NC} Set git core.excludesfile to $GLOBAL_GITIGNORE"
+  ((INSTALLED++)) || true
+else
+  echo -e "  ${DIM}-${NC} git core.excludesfile already set"
+  ((SKIPPED++)) || true
+fi
 echo ""
 
 # ══════════════════════════════════════════════════════════════
