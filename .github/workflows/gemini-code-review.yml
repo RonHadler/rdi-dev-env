@@ -64,6 +64,7 @@ jobs:
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
+          set -euo pipefail
           DIFF=$(git diff "origin/${BASE_REF}...HEAD" \
             -- . \
             ':!*.lock' ':!*.png' ':!*.jpg' ':!*.jpeg' ':!*.gif' ':!*.svg' ':!*.ico' \
@@ -79,13 +80,13 @@ jobs:
             exit 0
           fi
 
-          BYTE_COUNT=$(echo "$DIFF" | wc -c)
+          BYTE_COUNT=$(printf "%s" "$DIFF" | wc -c)
           if [ "$BYTE_COUNT" -gt "${{ env.MAX_DIFF_BYTES }}" ]; then
             echo "::warning::Diff is ${BYTE_COUNT} bytes, truncating to ${{ env.MAX_DIFF_BYTES }} bytes"
-            DIFF="$(echo "$DIFF" | head -c "${{ env.MAX_DIFF_BYTES }}")$(printf '\n\n[TRUNCATED — diff exceeded %s bytes, showing first %s]' "$BYTE_COUNT" "${{ env.MAX_DIFF_BYTES }}")"
+            DIFF="$(printf "%s" "$DIFF" | head -c "${{ env.MAX_DIFF_BYTES }}")$(printf '\n\n[TRUNCATED — diff exceeded %s bytes, showing first %s]' "$BYTE_COUNT" "${{ env.MAX_DIFF_BYTES }}")"
           fi
 
-          echo "$DIFF" > filtered-diff.txt
+          printf "%s" "$DIFF" > filtered-diff.txt
           echo "empty=false" >> "$GITHUB_OUTPUT"
 
       - name: Generate code review
