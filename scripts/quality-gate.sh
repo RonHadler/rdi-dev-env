@@ -46,7 +46,7 @@ PROJECT_ROOT="$(pwd)"
 PROJECT_NAME="$(basename "$PROJECT_ROOT")"
 PROJECT_TYPE="unknown"
 
-if [ -f "package.json" ] && [ -d "src" -o -d "app" -o -d "lib" ]; then
+if [ -f "package.json" ] && { [ -d "src" ] || [ -d "app" ] || [ -d "lib" ]; }; then
   PROJECT_TYPE="node"
 elif [ -f "pyproject.toml" ] || [ -f "setup.py" ] || [ -f "requirements.txt" ]; then
   PROJECT_TYPE="python"
@@ -116,17 +116,17 @@ security_scan() {
   local warnings=0
 
   # File extensions to scan based on project type
-  local include_flags=""
+  local include_flags=()
   case $PROJECT_TYPE in
-    node)   include_flags="--include='*.ts' --include='*.tsx' --include='*.js' --include='*.jsx'" ;;
-    python) include_flags="--include='*.py'" ;;
-    go)     include_flags="--include='*.go'" ;;
+    node)   include_flags=(--include='*.ts' --include='*.tsx' --include='*.js' --include='*.jsx') ;;
+    python) include_flags=(--include='*.py') ;;
+    go)     include_flags=(--include='*.go') ;;
   esac
 
   # ── Critical: Hardcoded API keys ──
   local keys
-  keys=$(eval grep -rnE $include_flags \
-    "'(sk-[a-zA-Z0-9]{20,}|AIza[a-zA-Z0-9_-]{35}|AKIA[A-Z0-9]{16}|ghp_[a-zA-Z0-9]{36})'" \
+  keys=$(grep -rnE "${include_flags[@]}" \
+    '(sk-[a-zA-Z0-9]{20,}|AIza[a-zA-Z0-9_-]{35}|AKIA[A-Z0-9]{16}|ghp_[a-zA-Z0-9]{36})' \
     "${WATCH_DIRS[@]}" 2>/dev/null \
     | grep -v node_modules | grep -v '.next' | grep -v __pycache__ \
     | grep -v '\.test\.' | grep -v '__tests__' | grep -v '_test\.' \
@@ -144,13 +144,13 @@ security_scan() {
   local evals
   case $PROJECT_TYPE in
     node)
-      evals=$(eval grep -rnE $include_flags "'\beval\s*\('" \
+      evals=$(grep -rnE "${include_flags[@]}" '\beval\s*\(' \
         "${WATCH_DIRS[@]}" 2>/dev/null \
         | grep -v node_modules | grep -v '.next' \
         | grep -v '\.test\.' | grep -v '__tests__' || true)
       ;;
     python)
-      evals=$(eval grep -rnE $include_flags "'\b(eval|exec)\s*\('" \
+      evals=$(grep -rnE "${include_flags[@]}" '\b(eval|exec)\s*\(' \
         "${WATCH_DIRS[@]}" 2>/dev/null \
         | grep -v __pycache__ | grep -v '\.test' | grep -v 'test_' || true)
       ;;
