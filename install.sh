@@ -68,7 +68,8 @@ link_file() {
     fi
 
     # Backup existing file
-    local backup="${dest}.backup.$(date +%Y%m%d-%H%M%S)"
+    local backup
+    backup="${dest}.backup.$(date +%Y%m%d-%H%M%S)"
     mv "$dest" "$backup"
     echo -e "  ${YELLOW}~${NC} $name — backed up to $(basename "$backup")"
     ((BACKED_UP++))
