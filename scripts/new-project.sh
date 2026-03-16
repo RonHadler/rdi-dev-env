@@ -72,11 +72,11 @@ prompt_yn() {
 }
 
 to_snake_case() {
-  echo "$1" | sed 's/-/_/g'
+  echo "$1" | sed 's/[- ]/_/g'
 }
 
 to_upper_snake_case() {
-  echo "$1" | sed 's/-/_/g' | tr '[:lower:]' '[:upper:]'
+  echo "$1" | sed 's/[- ]/_/g' | tr '[:lower:]' '[:upper:]'
 }
 
 # ── Dependency Check ─────────────────────────────────────────
@@ -105,16 +105,19 @@ substitute_markers() {
   # Escape pipe characters in user inputs to avoid breaking sed delimiter
   local safe_description="${PROJECT_DESCRIPTION//|/\\|}"
   local safe_display_name="${PROJECT_DISPLAY_NAME//|/\\|}"
+  local safe_project_name="${PROJECT_NAME//|/\\|}"
+  local safe_gcp_project="${GCP_PROJECT_ID//|/\\|}"
+  local safe_gcp_region="${GCP_REGION//|/\\|}"
 
   sed -i.bak \
     -e "s|<!-- CUSTOMIZE: Project Name -->|$safe_display_name|g" \
-    -e "s|<!-- CUSTOMIZE: project-name -->|$PROJECT_NAME|g" \
+    -e "s|<!-- CUSTOMIZE: project-name -->|$safe_project_name|g" \
     -e "s|<!-- CUSTOMIZE: package_name -->|$PACKAGE_NAME|g" \
     -e "s|<!-- CUSTOMIZE: PACKAGE_NAME -->|$UPPER_PACKAGE_NAME|g" \
     -e "s|<!-- CUSTOMIZE: description -->|$safe_description|g" \
     -e "s|<!-- CUSTOMIZE: date -->|$(date +%Y-%m-%d)|g" \
-    -e "s|<!-- CUSTOMIZE: GCP project ID -->|$GCP_PROJECT_ID|g" \
-    -e "s|<!-- CUSTOMIZE: GCP region -->|$GCP_REGION|g" \
+    -e "s|<!-- CUSTOMIZE: GCP project ID -->|$safe_gcp_project|g" \
+    -e "s|<!-- CUSTOMIZE: GCP region -->|$safe_gcp_region|g" \
     "$file" && rm -f "${file}.bak"
 }
 

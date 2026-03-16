@@ -157,7 +157,7 @@ pick_next_task() {
     | input.tasks
     | map(select(
         .status == "pending"
-        and .attempts < .max_attempts
+        and (.attempts // 0) < (.max_attempts // 3)
         and ((.blocked_by // []) - $completed | length) == 0
       ))
     | sort_by(.priority)
@@ -179,7 +179,7 @@ get_verification_field() {
   local task_id="$1"
   local field="$2"
   jq -r --arg id "$task_id" --arg f "$field" \
-    '.tasks[] | select(.id == $id) | .verification[$f] // empty' "$TASKS_FILE"
+    '.tasks[] | select(.id == $id) | (.verification // {})[$f] // empty' "$TASKS_FILE"
 }
 
 # Update task status and fields
@@ -258,8 +258,8 @@ preflight_usage_check() {
   [ "$USAGE_CHECK" != true ] && return 0
   [ ! -x "$monitor" ] && { log WARN "Usage monitor not found at $monitor"; return 0; }
 
-  "$monitor" can-afford "$estimated_msgs"
-  local rc=$?
+  local rc=0
+  "$monitor" can-afford "$estimated_msgs" || rc=$?
 
   case $rc in
     0) log OK "Budget OK — proceeding" ;;
@@ -268,7 +268,7 @@ preflight_usage_check() {
       local waited=0
       while [ $waited -lt 3600 ]; do
         sleep 300; waited=$((waited + 300))
-        "$monitor" can-afford "$estimated_msgs" && return 0
+        if "$monitor" can-afford "$estimated_msgs" 2>/dev/null; then return 0; fi
       done
       log ERROR "Budget did not recover after 1 hour"
       return 1
@@ -350,8 +350,8 @@ run_tests() {
 
   log INFO "Running tests: $test_cmd"
   local output
-  output=$(bash -c "$test_cmd" 2>&1)
-  local exit_code=$?
+  local exit_code=0
+  output=$(bash -c "$test_cmd" 2>&1) || exit_code=$?
 
   if [ $exit_code -eq 0 ]; then
     log OK "Tests passed"
@@ -646,16 +646,15 @@ while [ $ITERATION -lt $MAX_ITERATIONS ]; do
     store_last_error "$TASK_ID" "$TEST_OUTPUT"
     revert_changes
 
-    # Check if max attempts reached
-    current_attempts=$(get_task_field "$TASK_ID" "attempts")
-    max_attempts=$(get_task_field "$TASK_ID" "max_attempts")
-    if [ "$current_attempts" -ge "$max_attempts" ]; then
+    # Check if max attempts reached (reuse TASK_ATTEMPTS/TASK_MAX from loop header)
+    current_attempts=$((TASK_ATTEMPTS + 1))
+    if [ "$current_attempts" -ge "$TASK_MAX" ]; then
       mark_failed "$TASK_ID"
       ((FAILED++))
-      log ERROR "Task $TASK_ID failed after $max_attempts attempts"
+      log ERROR "Task $TASK_ID failed after $TASK_MAX attempts"
     else
       update_task_status "$TASK_ID" "pending"
-      log WARN "Task $TASK_ID failed (attempt $current_attempts/$max_attempts) — will retry"
+      log WARN "Task $TASK_ID failed (attempt $current_attempts/$TASK_MAX) — will retry"
     fi
   fi
 
