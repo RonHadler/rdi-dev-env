@@ -3,7 +3,7 @@ import logging
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from <!-- CUSTOMIZE: package_name -->.config import settings
+from <!-- CUSTOMIZE: package_name -->.config import get_settings
 from <!-- CUSTOMIZE: package_name -->.coordinator import mcp
 
 logger = logging.getLogger(__name__)
@@ -21,6 +21,7 @@ async def health_endpoint(request: Request) -> JSONResponse:
 
 def main() -> None:
     """Start the MCP server with configured transport."""
+    settings = get_settings()
     port = settings.port
     transport = settings.<!-- CUSTOMIZE: package_name -->_transport
 
