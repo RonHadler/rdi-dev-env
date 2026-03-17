@@ -138,6 +138,7 @@ declare -A SCRIPT_MAP=(
   ["scripts/usage-monitor.sh"]="rdi-usage-monitor"
   ["scripts/conversation-archiver.sh"]="rdi-conversation-archiver"
   ["scripts/context-reseeder.sh"]="rdi-context-reseeder"
+  ["scripts/audit-project.sh"]="rdi-audit"
 )
 
 for script in "${!SCRIPT_MAP[@]}"; do

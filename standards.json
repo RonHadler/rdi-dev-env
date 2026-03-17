@@ -1,0 +1,257 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "version": "1.0.0",
+  "description": "RDI Python/FastMCP project standards — declarative compliance checks",
+  "updated": "2026-03-17",
+  "target": "python-fastmcp",
+  "checks": [
+    {
+      "id": "SEC-001a",
+      "name": "Dockerfile has USER directive",
+      "severity": "critical",
+      "category": "security",
+      "description": "Dockerfile must switch to a non-root user via USER directive",
+      "type": "file_contains",
+      "path": "Dockerfile",
+      "pattern": "^USER[[:space:]]+[a-zA-Z]",
+      "remediation": "Add: RUN useradd -m appuser && chown -R appuser:appuser /app\\nUSER appuser"
+    },
+    {
+      "id": "SEC-001b",
+      "name": "Dockerfile USER is not root",
+      "severity": "critical",
+      "category": "security",
+      "description": "Dockerfile USER directive must not be set to root",
+      "type": "file_not_contains",
+      "path": "Dockerfile",
+      "pattern": "^USER[[:space:]]+root",
+      "remediation": "Change USER root to USER appuser (create user first with useradd)"
+    },
+    {
+      "id": "SEC-002",
+      "name": "No hardcoded secrets",
+      "severity": "critical",
+      "category": "security",
+      "description": "Source files must not contain hardcoded API keys or tokens",
+      "type": "file_not_contains",
+      "path": "**/*.py",
+      "pattern": "(sk-[a-zA-Z0-9]{20,}|AIza[a-zA-Z0-9_-]{35}|AKIA[A-Z0-9]{16}|ghp_[a-zA-Z0-9]{36})",
+      "remediation": "Move secrets to .env files or GCP Secret Manager"
+    },
+    {
+      "id": "SEC-003",
+      "name": "Frozen dependency install",
+      "severity": "critical",
+      "category": "security",
+      "description": "Dockerfile uv sync must use --frozen or --no-dev to prevent uncontrolled dep resolution",
+      "type": "file_contains",
+      "path": "Dockerfile",
+      "pattern": "uv sync.*--frozen|uv sync.*--no-dev",
+      "remediation": "Change 'uv sync' to 'uv sync --frozen --no-dev' in Dockerfile"
+    },
+    {
+      "id": "SEC-004",
+      "name": "Docker layer caching",
+      "severity": "high",
+      "category": "security",
+      "description": "Dockerfile should copy dependency files before source for layer caching",
+      "type": "file_contains",
+      "path": "Dockerfile",
+      "pattern": "COPY.*pyproject\\.toml.*uv\\.lock",
+      "remediation": "Add: COPY pyproject.toml uv.lock* /app/ before COPY . /app"
+    },
+    {
+      "id": "CI-001",
+      "name": "CI lint/test workflow",
+      "severity": "high",
+      "category": "ci",
+      "description": "Project must have a CI workflow that runs linting and tests",
+      "type": "file_exists",
+      "path": ".github/workflows/ci.yml",
+      "remediation": "Copy ci-python.yml from rdi-dev-env/templates/github-workflows/"
+    },
+    {
+      "id": "CI-002",
+      "name": "Security scan workflow",
+      "severity": "high",
+      "category": "ci",
+      "description": "Project must have a security scanning workflow",
+      "type": "file_exists",
+      "path": ".github/workflows/security.yml",
+      "remediation": "Copy security-python.yml from rdi-dev-env/templates/github-workflows/"
+    },
+    {
+      "id": "CI-003",
+      "name": "Gemini code review workflow",
+      "severity": "high",
+      "category": "ci",
+      "description": "Project must have automated AI code review on PRs",
+      "type": "file_exists",
+      "path": ".github/workflows/gemini-code-review.yml",
+      "remediation": "Copy gemini-code-review.yml from rdi-dev-env/templates/github-workflows/"
+    },
+    {
+      "id": "CI-004",
+      "name": "uv from official image",
+      "severity": "high",
+      "category": "ci",
+      "description": "Dockerfile should install uv from the official container image, not pip",
+      "type": "file_contains",
+      "path": "Dockerfile",
+      "pattern": "COPY --from=ghcr\\.io/astral-sh/uv",
+      "remediation": "Replace 'pip install uv' with 'COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/'"
+    },
+    {
+      "id": "QUAL-001",
+      "name": "Build system in pyproject.toml",
+      "severity": "medium",
+      "category": "quality",
+      "description": "pyproject.toml must declare a [build-system] section",
+      "type": "file_contains",
+      "path": "pyproject.toml",
+      "pattern": "^\\[build-system\\]",
+      "remediation": "Add [build-system]\\nrequires = [\"setuptools>=61.0\"]\\nbuild-backend = \"setuptools.build_meta\""
+    },
+    {
+      "id": "QUAL-002",
+      "name": "Pydantic Settings",
+      "severity": "medium",
+      "category": "quality",
+      "description": "Project should use pydantic-settings for configuration",
+      "type": "file_contains",
+      "path": "pyproject.toml",
+      "pattern": "pydantic-settings",
+      "remediation": "Add pydantic-settings>=2.0 to project dependencies"
+    },
+    {
+      "id": "QUAL-003",
+      "name": "Settings getter pattern",
+      "severity": "medium",
+      "category": "quality",
+      "description": "Config module should expose a get_settings() accessor for the singleton",
+      "type": "file_contains",
+      "path": "**/config.py",
+      "pattern": "def get_settings\\(",
+      "remediation": "Add: def get_settings() -> Settings:\\n    return settings"
+    },
+    {
+      "id": "QUAL-004",
+      "name": "Conftest env reset",
+      "severity": "medium",
+      "category": "quality",
+      "description": "Test conftest.py should reset environment and re-instantiate Settings singleton",
+      "type": "file_contains",
+      "path": "**/conftest.py",
+      "pattern": "config\\.settings\\s*=\\s*Settings\\(",
+      "remediation": "Add autouse fixture that monkeypatches env and re-instantiates config.settings = Settings()"
+    },
+    {
+      "id": "QUAL-005",
+      "name": "Makefile present",
+      "severity": "medium",
+      "category": "quality",
+      "description": "Project must have a Makefile with standard targets",
+      "type": "file_exists",
+      "path": "Makefile",
+      "remediation": "Copy and customize Makefile from rdi-dev-env/templates/python-fastmcp/"
+    },
+    {
+      "id": "QUAL-006",
+      "name": "No python-dotenv",
+      "severity": "medium",
+      "category": "quality",
+      "description": "Projects using pydantic-settings should not also use python-dotenv for env loading",
+      "type": "file_not_contains",
+      "path": "**/server.py",
+      "pattern": "dotenv\\.load_dotenv\\(|load_dotenv\\(",
+      "remediation": "Remove load_dotenv() calls — pydantic-settings handles .env loading via model_config"
+    },
+    {
+      "id": "QUAL-007",
+      "name": "uv.lock committed",
+      "severity": "medium",
+      "category": "quality",
+      "description": "uv.lock should be committed for reproducible builds",
+      "type": "file_exists",
+      "path": "uv.lock",
+      "remediation": "Run 'uv lock' and commit the resulting uv.lock file"
+    },
+    {
+      "id": "CON-001",
+      "name": "CLAUDE.md present",
+      "severity": "low",
+      "category": "consistency",
+      "description": "Project should have a CLAUDE.md for Claude Code context",
+      "type": "file_exists",
+      "path": "CLAUDE.md",
+      "remediation": "Copy and customize CLAUDE.md from rdi-dev-env/templates/python-fastmcp/"
+    },
+    {
+      "id": "CON-002",
+      "name": "AGENTS.md present",
+      "severity": "low",
+      "category": "consistency",
+      "description": "Project should have an AGENTS.md for shared agent context",
+      "type": "file_exists",
+      "path": "AGENTS.md",
+      "remediation": "Copy and customize AGENTS.md from rdi-dev-env/templates/"
+    },
+    {
+      "id": "CON-003",
+      "name": "GEMINI.md present",
+      "severity": "low",
+      "category": "consistency",
+      "description": "Project should have a GEMINI.md for Gemini review standards",
+      "type": "file_exists",
+      "path": "GEMINI.md",
+      "remediation": "Copy and customize GEMINI.md from rdi-dev-env/templates/"
+    },
+    {
+      "id": "CON-004",
+      "name": "Dependabot config",
+      "severity": "low",
+      "category": "consistency",
+      "description": "Project should have dependabot.yml for automated dependency updates",
+      "type": "file_exists",
+      "path": ".github/dependabot.yml",
+      "remediation": "Copy dependabot.yml from rdi-dev-env/templates/github-workflows/"
+    },
+    {
+      "id": "CON-005",
+      "name": "Stale workflow",
+      "severity": "low",
+      "category": "consistency",
+      "description": "Project should have a stale PR/issue cleanup workflow",
+      "type": "file_exists",
+      "path": ".github/workflows/stale.yml",
+      "remediation": "Copy stale.yml from rdi-dev-env/templates/github-workflows/"
+    },
+    {
+      "id": "CON-006",
+      "name": "RDI baseline marker",
+      "severity": "low",
+      "category": "consistency",
+      "description": "Project should have .rdi-baseline tracking adoption version",
+      "type": "file_exists",
+      "path": ".rdi-baseline",
+      "remediation": "Create .rdi-baseline with adoption version and any suppressed checks"
+    }
+  ],
+  "baseline_spec": {
+    "description": ".rdi-baseline JSON marker file schema",
+    "fields": {
+      "version": "standards.json version this project adopted (e.g. 1.0.0)",
+      "adopted": "ISO date of initial adoption",
+      "suppress": "Array of check IDs to suppress with reason strings",
+      "notes": "Free-form string for project-specific context"
+    },
+    "example": {
+      "version": "1.0.0",
+      "adopted": "2026-03-16",
+      "suppress": [
+        { "id": "QUAL-006", "reason": "Alembic env.py needs load_dotenv for standalone execution" }
+      ],
+      "notes": ""
+    }
+  }
+}
