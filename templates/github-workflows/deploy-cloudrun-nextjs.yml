@@ -55,7 +55,7 @@ jobs:
       id-token: write  # Required for Workload Identity Federation
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ github.event.inputs.ref || github.ref }}
 
