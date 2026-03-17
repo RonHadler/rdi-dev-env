@@ -59,20 +59,52 @@ extract_metadata() {
     return 1
   fi
 
-  # Extract project name (e.g. "rdi-datagov-mcp")
-  PROJECT_NAME=$(grep -E '^name\s*=' "$pyproject" | head -1 | sed 's/.*=\s*"\(.*\)"/\1/')
+  # Use Python's tomllib for robust TOML parsing (Python 3.11+)
+  local python_cmd="python3"
+  if ! python3 --version &>/dev/null; then
+    python_cmd="python"
+  fi
 
-  # Derive package name: rdi-datagov-mcp -> rdi_datagov_mcp
-  PACKAGE_NAME=$(echo "$PROJECT_NAME" | tr '-' '_')
+  local py_script
+  py_script=$(cat <<'PYEOF'
+import tomllib, json, sys
+with open(sys.argv[1], "rb") as f:
+    data = tomllib.load(f)
+p = data.get("project", {})
+name = p.get("name", "")
+desc = p.get("description", "")
+pkg = name.replace("-", "_")
+upper = pkg.upper()
+display = name.replace("-", " ").title()
+print(json.dumps({"name": name, "pkg": pkg, "upper": upper, "display": display, "desc": desc}))
+PYEOF
+)
+  local metadata
+  metadata=$($python_cmd -c "$py_script" "$pyproject" 2>/dev/null) || true
 
-  # Derive upper package name: RDI_DATAGOV_MCP
-  UPPER_PACKAGE_NAME=$(echo "$PACKAGE_NAME" | tr '[:lower:]' '[:upper:]')
+  if [ -z "$metadata" ]; then
+    echo -e "${RED}Error:${NC} Could not parse pyproject.toml (requires Python 3.11+)" >&2
+    return 1
+  fi
 
-  # Derive display name: rdi-datagov-mcp -> RDI Datagov MCP
-  DISPLAY_NAME=$(echo "$PROJECT_NAME" | sed 's/-/ /g' | sed 's/\b\(.\)/\u\1/g')
-
-  # Extract description
-  DESCRIPTION=$(grep -E '^description\s*=' "$pyproject" | head -1 | sed 's/.*=\s*"\(.*\)"/\1/' || echo "")
+  # Extract fields from JSON (works with jq or node)
+  if command -v jq &>/dev/null; then
+    PROJECT_NAME=$(printf '%s' "$metadata" | jq -r '.name')
+    PACKAGE_NAME=$(printf '%s' "$metadata" | jq -r '.pkg')
+    UPPER_PACKAGE_NAME=$(printf '%s' "$metadata" | jq -r '.upper')
+    DISPLAY_NAME=$(printf '%s' "$metadata" | jq -r '.display')
+    DESCRIPTION=$(printf '%s' "$metadata" | jq -r '.desc')
+  elif command -v node &>/dev/null; then
+    local parsed
+    parsed=$(node -e "
+      const d = JSON.parse(process.argv[1]);
+      console.log([d.name, d.pkg, d.upper, d.display, d.desc].join('\t'));
+    " -- "$metadata")
+    IFS=$'\t' read -r PROJECT_NAME PACKAGE_NAME UPPER_PACKAGE_NAME DISPLAY_NAME DESCRIPTION <<< "$parsed"
+  else
+    echo -e "${RED}Error:${NC} Either jq or node is required" >&2
+    return 1
+  fi
 
   if [ -z "$PROJECT_NAME" ]; then
     echo -e "${RED}Error:${NC} Could not extract project name from $pyproject" >&2
@@ -80,17 +112,29 @@ extract_metadata() {
   fi
 }
 
-# ── Apply substitutions to a template ─────────────────────────
+# ── Escape a string for use in sed replacement ────────────────
+sed_escape() {
+  printf '%s' "$1" | sed 's/[&/|\\]/\\&/g'
+}
+
+# ── Apply substitutions to a template file (reads from stdin) ─
 apply_substitutions() {
-  local content="$1"
-  echo "$content" \
-    | sed "s|<!-- CUSTOMIZE: Project Name -->|$DISPLAY_NAME|g" \
-    | sed "s|<!-- CUSTOMIZE: project-name -->|$PROJECT_NAME|g" \
-    | sed "s|<!-- CUSTOMIZE: package_name -->|$PACKAGE_NAME|g" \
-    | sed "s|<!-- CUSTOMIZE: PACKAGE_NAME -->|$UPPER_PACKAGE_NAME|g" \
-    | sed "s|<!-- CUSTOMIZE: description -->|$DESCRIPTION|g" \
-    | sed "s|<!-- CUSTOMIZE: date -->|$(date +%Y-%m-%d)|g" \
-    | sed "s|# CUSTOMIZE:.*||g"
+  local safe_display safe_name safe_pkg safe_upper safe_desc safe_date
+  safe_display=$(sed_escape "$DISPLAY_NAME")
+  safe_name=$(sed_escape "$PROJECT_NAME")
+  safe_pkg=$(sed_escape "$PACKAGE_NAME")
+  safe_upper=$(sed_escape "$UPPER_PACKAGE_NAME")
+  safe_desc=$(sed_escape "$DESCRIPTION")
+  safe_date=$(date +%Y-%m-%d)
+
+  sed \
+    -e "s|<!-- CUSTOMIZE: Project Name -->|$safe_display|g" \
+    -e "s|<!-- CUSTOMIZE: project-name -->|$safe_name|g" \
+    -e "s|<!-- CUSTOMIZE: package_name -->|$safe_pkg|g" \
+    -e "s|<!-- CUSTOMIZE: PACKAGE_NAME -->|$safe_upper|g" \
+    -e "s|<!-- CUSTOMIZE: description -->|$safe_desc|g" \
+    -e "s|<!-- CUSTOMIZE: date -->|$safe_date|g" \
+    -e "s|# CUSTOMIZE:.*||g"
 }
 
 # ── Process a single managed file ─────────────────────────────
@@ -108,38 +152,38 @@ process_file() {
     return 1
   fi
 
-  # Read template and apply substitutions
-  local content
-  content=$(cat "$template_path")
-  local processed
-  processed=$(apply_substitutions "$content")
+  # Generate processed content into a temp file (avoids variable truncation)
+  local tmpfile
+  tmpfile=$(mktemp)
+  apply_substitutions < "$template_path" > "$tmpfile"
 
   # Check if destination exists and compare
   if [ -f "$dest_path" ]; then
-    local existing
-    existing=$(cat "$dest_path")
-    if [ "$processed" = "$existing" ]; then
+    if diff -q "$tmpfile" "$dest_path" >/dev/null 2>&1; then
       echo -e "  ${DIM}-${NC} $dest_rel — already up to date"
+      rm -f "$tmpfile"
       return 0
     fi
 
     if [ "$apply" = "true" ]; then
       mkdir -p "$(dirname "$dest_path")"
-      echo "$processed" > "$dest_path"
+      mv "$tmpfile" "$dest_path"
       echo -e "  ${GREEN}↻${NC} $dest_rel — updated"
       ((UPDATED++)) || true
     else
       echo -e "  ${YELLOW}~${NC} $dest_rel — would update (differs from template)"
+      rm -f "$tmpfile"
       ((WOULD_UPDATE++)) || true
     fi
   else
     if [ "$apply" = "true" ]; then
       mkdir -p "$(dirname "$dest_path")"
-      echo "$processed" > "$dest_path"
+      mv "$tmpfile" "$dest_path"
       echo -e "  ${GREEN}+${NC} $dest_rel — created"
       ((CREATED++)) || true
     else
       echo -e "  ${YELLOW}+${NC} $dest_rel — would create (missing)"
+      rm -f "$tmpfile"
       ((WOULD_CREATE++)) || true
     fi
   fi
@@ -266,15 +310,17 @@ main() {
     local audit_script="$DEV_ENV_DIR/scripts/audit-project.sh"
     if [ -f "$audit_script" ]; then
       bash "$audit_script" "$project_dir" --generate-tasks > "$project_dir/tasks.json"
-      local task_count
+      local task_count=0
       if command -v jq &>/dev/null; then
-        task_count=$(jq '.tasks | length' "$project_dir/tasks.json")
-      else
+        task_count=$(jq '.tasks | length' "$project_dir/tasks.json" 2>/dev/null || echo "0")
+      elif command -v node &>/dev/null; then
         task_count=$(node -e "
           const fs = require('fs'), path = require('path');
           const d = JSON.parse(fs.readFileSync(path.resolve(process.argv[1]), 'utf8'));
           console.log(d.tasks.length);
-        " -- "$project_dir/tasks.json")
+        " -- "$project_dir/tasks.json" 2>/dev/null || echo "0")
+      else
+        echo -e "  ${YELLOW}~${NC} tasks.json — created (install jq or node to see task count)"
       fi
       if [ "$task_count" -gt 0 ]; then
         echo -e "  ${GREEN}+${NC} tasks.json — $task_count remaining task(s) for project agent"
