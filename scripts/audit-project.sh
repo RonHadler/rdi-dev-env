@@ -62,6 +62,9 @@ declare -a STD_PATTERNS=()
 declare -a STD_REMEDIATIONS=()
 
 # Parse standards.json once into bash arrays (single jq/node invocation)
+# NOTE: Records are newline-delimited. standards.json must use \\n (literal)
+# not actual newlines in field values. If multi-line fields are ever needed,
+# switch to null-byte record delimiters with read -r -d ''.
 load_standards() {
   local raw delim=$'\x1f'  # ASCII Unit Separator — won't appear in check data
   if [ "$JSON_TOOL" = "jq" ]; then
@@ -595,12 +598,7 @@ show_dashboard() {
 
     local score pass fail skip critical_fails upstream status_icon
     if [ "$JSON_TOOL" = "jq" ]; then
-      score=$(echo "$json_result" | jq -r '.score')
-      pass=$(echo "$json_result" | jq -r '.pass')
-      fail=$(echo "$json_result" | jq -r '.fail')
-      skip=$(echo "$json_result" | jq -r '.skip')
-      critical_fails=$(echo "$json_result" | jq -r '.critical_failures')
-      upstream=$(echo "$json_result" | jq -r '.upstream_candidates')
+      read -r score pass fail skip critical_fails upstream <<< "$(echo "$json_result" | jq -r '[.score, .pass, .fail, .skip, .critical_failures, .upstream_candidates] | @tsv')"
     else
       # Parse all fields in a single node call for efficiency
       local parsed
@@ -627,9 +625,13 @@ show_dashboard() {
     elif [ "$score" -ge 60 ]; then score_color="$YELLOW"
     fi
 
-    local upstream_display="${upstream:-0}"
-    if [ "$upstream_display" -gt 0 ] 2>/dev/null; then
-      upstream_display="${CYAN}${upstream_display}${NC}"
+    local upstream_val="${upstream:-0}"
+    local upstream_display
+    if [ "$upstream_val" -gt 0 ] 2>/dev/null; then
+      # Pad to 4 chars visible width (ANSI codes don't count for width)
+      upstream_display="${CYAN}$(printf '%-4s' "$upstream_val")${NC}"
+    else
+      upstream_display="$(printf '%-4s' "$upstream_val")"
     fi
 
     printf "  %-30s  ${score_color}%-7s${NC}  %-6s  %-5s  %-5s  %b  %b\n" \

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "version": "1.0.0",
   "description": "RDI Python/FastMCP project standards — declarative compliance checks",
-  "updated": "2026-03-16",
+  "updated": "2026-03-17",
   "target": "python-fastmcp",
   "checks": [
     {
