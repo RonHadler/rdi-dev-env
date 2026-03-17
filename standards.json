@@ -235,6 +235,17 @@
       "type": "file_exists",
       "path": ".rdi-baseline",
       "remediation": "Create .rdi-baseline with adoption version and any suppressed checks"
+    },
+    {
+      "id": "CON-007",
+      "name": "CLAUDE.md references tasks.json",
+      "severity": "low",
+      "category": "consistency",
+      "description": "CLAUDE.md should instruct agents to check tasks.json for pending work",
+      "type": "file_contains",
+      "path": "CLAUDE.md",
+      "pattern": "tasks\\.json",
+      "remediation": "Add tasks.json check to Session Startup Checklist in CLAUDE.md"
     }
   ],
   "baseline_spec": {

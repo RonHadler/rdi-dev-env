@@ -69,12 +69,12 @@ Read: docs/current-tasks.md
 - **Up Next** - What's the next task to start?
 - **Blocked** - Are there any blockers?
 
-### Step 2: Check Ralph Loop Tasks (If Running Autonomously)
+### Step 2: Check for Pending Tasks
 ```bash
 Read: tasks.json
 ```
 
-**You may be running in a Ralph Loop** — if `tasks.json` exists, check for tasks with status `in_progress` assigned to you. Complete the task, run verification, and update the task status.
+If `tasks.json` exists, it contains prioritized tasks (from `rdi-audit`, Ralph Loop, or manual creation). Work through them in priority order (1 = highest). After completing each task, run its `verification.test_command` to confirm the fix, then update the task status to `completed`.
 
 ### Step 3: Read Implementation Plan (If Active)
 ```bash
