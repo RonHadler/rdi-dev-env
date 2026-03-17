@@ -25,7 +25,7 @@
             --region="$REGION" \
             --sort-by=~metadata.creationTimestamp \
             --format='value(metadata.name)' \
-            --limit=2 | tail -n 1)
+            --limit=2 | sed -n '2p')
           if [ -n "$PREV_REV" ]; then
             gcloud run services update-traffic "$SERVICE_NAME" \
               --region="$REGION" \
