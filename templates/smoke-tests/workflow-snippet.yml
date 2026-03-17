@@ -8,7 +8,7 @@
 
       # ── Smoke Tests ──
       - name: Run smoke tests
-        if: steps.health.outcome == 'success'
+        id: smoke
         env:
           SMOKE_TEST_URL: ${{ steps.deploy.outputs.url }}/mcp
           SMOKE_TEST_AUTH_TOKEN: ${{ secrets.SMOKE_TEST_AUTH_TOKEN }}
@@ -17,9 +17,20 @@
           uv run pytest tests/smoke/ -v -m smoke --tb=short
 
       - name: Rollback on smoke failure
-        if: failure() && steps.deploy.outcome == 'success'
+        if: failure() && steps.smoke.outcome == 'failure'
         run: |
-          echo "::error::Smoke tests failed — rolling back deployment"
-          gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
+          echo "::error::Smoke tests failed — rolling back to previous revision"
+          PREV_REV=$(gcloud run revisions list \
+            --service=${{ env.SERVICE_NAME }} \
             --region=${{ env.REGION }} \
-            --to-revisions=LATEST=0
+            --sort-by=~metadata.creationTimestamp \
+            --format='value(metadata.name)' \
+            --limit=2 | tail -n 1)
+          if [ -n "$PREV_REV" ]; then
+            gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
+              --region=${{ env.REGION }} \
+              --to-revisions=$PREV_REV=100
+            echo "Rolled back to revision: $PREV_REV"
+          else
+            echo "::warning::No previous revision found — cannot rollback"
+          fi
