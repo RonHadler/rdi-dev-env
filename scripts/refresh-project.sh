@@ -34,6 +34,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEV_ENV_DIR="$(dirname "$SCRIPT_DIR")"
 TEMPLATES_DIR="$DEV_ENV_DIR/templates"
 
+# ── Python command (python3 or python) ───────────────────────
+PYTHON_CMD="python3"
+if ! python3 --version &>/dev/null; then
+  PYTHON_CMD="python"
+fi
+
 # ── Managed file manifest ────────────────────────────────────
 # Format: "template_source:project_destination"
 # These files are owned by rdi-dev-env and can be overwritten safely.
@@ -59,12 +65,6 @@ extract_metadata() {
     return 1
   fi
 
-  # Use Python's tomllib for robust TOML parsing (Python 3.11+)
-  PYTHON_CMD="python3"
-  if ! python3 --version &>/dev/null; then
-    PYTHON_CMD="python"
-  fi
-
   # Output TSV directly from Python — no jq/node dependency needed
   local py_script
   py_script=$(cat <<'PYEOF'
@@ -86,7 +86,7 @@ PYEOF
 )
   local metadata
   if ! metadata=$($PYTHON_CMD -c "$py_script" "$pyproject" 2>/dev/null); then
-    echo -e "${RED}Error:${NC} Could not parse pyproject.toml (requires Python 3.11+ or 'tomli' package)" >&2
+    echo -e "${RED}Error:${NC} Could not parse pyproject.toml (file may be malformed, or requires Python 3.11+ / 'tomli')" >&2
     return 1
   fi
 
@@ -100,7 +100,7 @@ PYEOF
 
 # ── Escape a string for use in sed replacement ────────────────
 sed_escape() {
-  printf '%s' "$1" | sed 's/[&/|\\]/\\&/g'
+  printf '%s' "$1" | sed 's/[&|\\]/\\&/g'
 }
 
 # ── Apply substitutions to a template file (reads from stdin) ─
