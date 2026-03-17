@@ -49,55 +49,56 @@ else
 fi
 
 # ── JSON helpers ─────────────────────────────────────────────
-# Extract a field from JSON using jq or node
-json_query() {
-  local file="$1"
-  local query="$2"
+# Pre-parsed check arrays (populated by load_standards)
+STD_VERSION=""
+STD_COUNT=0
+declare -a STD_IDS=()
+declare -a STD_NAMES=()
+declare -a STD_SEVERITIES=()
+declare -a STD_CATEGORIES=()
+declare -a STD_TYPES=()
+declare -a STD_PATHS=()
+declare -a STD_PATTERNS=()
+declare -a STD_REMEDIATIONS=()
 
+# Parse standards.json once into bash arrays (single jq/node invocation)
+load_standards() {
+  local raw delim=$'\x1f'  # ASCII Unit Separator — won't appear in check data
   if [ "$JSON_TOOL" = "jq" ]; then
-    jq -r ".$query" "$file" 2>/dev/null
+    STD_VERSION=$(jq -r '.version' "$STANDARDS_FILE")
+    raw=$(jq -r --arg d "$delim" '.checks[] | [.id, .name, .severity, .category, .type, .path, (.pattern // ""), (.remediation // "")] | join($d)' "$STANDARDS_FILE")
   else
-    node -e "
+    raw=$(node -e "
       const fs = require('fs'), path = require('path');
-      const fp = path.resolve(process.argv[1]);
-      const data = JSON.parse(fs.readFileSync(fp, 'utf8'));
-      const result = data[process.argv[2]];
-      if (Array.isArray(result)) { result.forEach(r => console.log(typeof r === 'object' ? JSON.stringify(r) : r)); }
-      else { console.log(typeof result === 'object' ? JSON.stringify(result) : result); }
-    " -- "$file" "$query" 2>/dev/null
+      const d = JSON.parse(fs.readFileSync(path.resolve(process.argv[1]), 'utf8'));
+      const sep = '\x1f';
+      process.stdout.write('VERSION' + sep + d.version + '\n');
+      d.checks.forEach(c => {
+        const fields = [c.id, c.name, c.severity, c.category, c.type, c.path, c.pattern || '', c.remediation || ''];
+        process.stdout.write(fields.join(sep) + '\n');
+      });
+    " -- "$STANDARDS_FILE")
+    # Extract version from first line if using node
+    STD_VERSION=$(echo "$raw" | head -1 | cut -d "$delim" -f2)
+    raw=$(echo "$raw" | tail -n +2)
   fi
+
+  STD_COUNT=0
+  while IFS="$delim" read -r id name severity category type ckpath pattern remediation; do
+    STD_IDS+=("$id")
+    STD_NAMES+=("$name")
+    STD_SEVERITIES+=("$severity")
+    STD_CATEGORIES+=("$category")
+    STD_TYPES+=("$type")
+    STD_PATHS+=("$ckpath")
+    STD_PATTERNS+=("$pattern")
+    STD_REMEDIATIONS+=("$remediation")
+    ((STD_COUNT++)) || true
+  done <<< "$raw"
 }
 
-# Get check count
-get_check_count() {
-  if [ "$JSON_TOOL" = "jq" ]; then
-    jq '.checks | length' "$STANDARDS_FILE"
-  else
-    node -e "
-      const fs = require('fs'), path = require('path');
-      const fp = path.resolve(process.argv[1]);
-      const d = JSON.parse(fs.readFileSync(fp, 'utf8'));
-      console.log(d.checks.length);
-    " -- "$STANDARDS_FILE"
-  fi
-}
-
-# Get check field by index
-get_check_field() {
-  local index="$1"
-  local field="$2"
-
-  if [ "$JSON_TOOL" = "jq" ]; then
-    jq -r ".checks[$index].$field" "$STANDARDS_FILE"
-  else
-    node -e "
-      const fs = require('fs'), path = require('path');
-      const fp = path.resolve(process.argv[1]);
-      const d = JSON.parse(fs.readFileSync(fp, 'utf8'));
-      console.log(d.checks[parseInt(process.argv[2])][process.argv[3]] || '');
-    " -- "$STANDARDS_FILE" "$index" "$field"
-  fi
-}
+# Load once at startup
+load_standards
 
 # ── Known RDI Python projects ───────────────────────────────
 RDI_PROJECTS=(
@@ -141,12 +142,10 @@ run_check() {
   local project_dir="$1"
   local index="$2"
 
-  local check_id check_type check_path check_pattern severity
-  check_id=$(get_check_field "$index" "id")
-  check_type=$(get_check_field "$index" "type")
-  check_path=$(get_check_field "$index" "path")
-  check_pattern=$(get_check_field "$index" "pattern")
-  severity=$(get_check_field "$index" "severity")
+  local check_id="${STD_IDS[$index]}"
+  local check_type="${STD_TYPES[$index]}"
+  local check_path="${STD_PATHS[$index]}"
+  local check_pattern="${STD_PATTERNS[$index]}"
 
   # Check suppression
   if is_suppressed "$project_dir" "$check_id"; then
@@ -167,20 +166,11 @@ run_check() {
       # Handle glob patterns in path
       local target_files=()
       if [[ "$check_path" == *"*"* ]]; then
-        # Glob pattern — find matching files
+        local find_name
+        find_name=$(basename "$check_path")
         while IFS= read -r -d '' f; do
           target_files+=("$f")
-        done < <(find "$project_dir" -path "$project_dir/.venv" -prune -o -path "$project_dir/.git" -prune -o -path "$project_dir/node_modules" -prune -o -path "$project_dir/$check_path" -print0 2>/dev/null)
-
-        # If glob didn't work with find -path, try a simpler approach
-        if [ ${#target_files[@]} -eq 0 ]; then
-          # Convert glob to find-compatible pattern
-          local find_name
-          find_name=$(basename "$check_path")
-          while IFS= read -r -d '' f; do
-            target_files+=("$f")
-          done < <(find "$project_dir" -path "$project_dir/.venv" -prune -o -path "$project_dir/.git" -prune -o -name "$find_name" -print0 2>/dev/null)
-        fi
+        done < <(find "$project_dir" -path "*/.venv" -prune -o -path "*/.git" -prune -o -path "*/node_modules" -prune -o -name "$find_name" -print0 2>/dev/null)
       else
         if [ -f "$project_dir/$check_path" ]; then
           target_files=("$project_dir/$check_path")
@@ -210,19 +200,11 @@ run_check() {
     file_not_contains)
       local target_files=()
       if [[ "$check_path" == *"*"* ]]; then
-        # Glob pattern — find matching files
+        local find_name
+        find_name=$(basename "$check_path")
         while IFS= read -r -d '' f; do
           target_files+=("$f")
-        done < <(find "$project_dir" -path "$project_dir/.venv" -prune -o -path "$project_dir/.git" -prune -o -path "$project_dir/node_modules" -prune -o -path "$project_dir/$check_path" -print0 2>/dev/null)
-
-        # Fallback to basename matching if find -path didn't match
-        if [ ${#target_files[@]} -eq 0 ]; then
-          local find_name
-          find_name=$(basename "$check_path")
-          while IFS= read -r -d '' f; do
-            target_files+=("$f")
-          done < <(find "$project_dir" -path "$project_dir/.venv" -prune -o -path "$project_dir/.git" -prune -o -name "$find_name" -print0 2>/dev/null)
-        fi
+        done < <(find "$project_dir" -path "*/.venv" -prune -o -path "*/.git" -prune -o -path "*/node_modules" -prune -o -name "$find_name" -print0 2>/dev/null)
       else
         if [ -f "$project_dir/$check_path" ]; then
           target_files=("$project_dir/$check_path")
@@ -355,8 +337,7 @@ audit_project() {
     echo -e "${YELLOW}Warning:${NC} $project_name does not appear to be a Python project" >&2
   fi
 
-  local check_count
-  check_count=$(get_check_count)
+  local check_count=$STD_COUNT
 
   local pass_count=0
   local fail_count=0
@@ -373,25 +354,20 @@ audit_project() {
   declare -a result_remediations=()
 
   for ((i=0; i<check_count; i++)); do
-    local check_id check_name severity result remediation
-    check_id=$(get_check_field "$i" "id")
-    check_name=$(get_check_field "$i" "name")
-    severity=$(get_check_field "$i" "severity")
-    remediation=$(get_check_field "$i" "remediation")
-
+    local result
     result=$(run_check "$project_dir" "$i")
 
-    result_ids+=("$check_id")
-    result_names+=("$check_name")
-    result_severities+=("$severity")
+    result_ids+=("${STD_IDS[$i]}")
+    result_names+=("${STD_NAMES[$i]}")
+    result_severities+=("${STD_SEVERITIES[$i]}")
     result_statuses+=("$result")
-    result_remediations+=("$remediation")
+    result_remediations+=("${STD_REMEDIATIONS[$i]}")
 
     case "$result" in
       pass) ((pass_count++)) || true ;;
       fail)
         ((fail_count++)) || true
-        case "$severity" in
+        case "${STD_SEVERITIES[$i]}" in
           critical) ((critical_fails++)) || true ;;
           high) ((high_fails++)) || true ;;
         esac
@@ -430,10 +406,14 @@ audit_project() {
     done
     upstream_json+="]"
 
+    local safe_project_name safe_project_dir
+    safe_project_name=$(echo "$project_name" | sed 's/\\/\\\\/g; s/"/\\"/g')
+    safe_project_dir=$(echo "$project_dir" | sed 's/\\/\\\\/g; s/"/\\"/g')
+
     cat <<EOF
 {
-  "project": "$project_name",
-  "path": "$project_dir",
+  "project": "$safe_project_name",
+  "path": "$safe_project_dir",
   "score": $score,
   "pass": $pass_count,
   "fail": $fail_count,
@@ -456,7 +436,9 @@ EOF
   if [ "$output_mode" = "tasks" ]; then
     local task_num=1
     local tasks_json
-    tasks_json="{\"version\":\"1.0\",\"project\":\"$project_name\",\"generated_by\":\"rdi-audit\",\"generated_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"tasks\":["
+    local safe_name
+    safe_name=$(echo "$project_name" | sed 's/\\/\\\\/g; s/"/\\"/g')
+    tasks_json="{\"version\":\"1.0\",\"project\":\"$safe_name\",\"generated_by\":\"rdi-audit\",\"generated_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"tasks\":["
     local first_task=true
 
     for ((i=0; i<${#result_ids[@]}; i++)); do
@@ -577,17 +559,7 @@ EOF
 # ── Dashboard: status of all known projects ─────────────────
 show_dashboard() {
   echo -e "${CYAN}${BOLD}RDI Standards Compliance Dashboard${NC}"
-  local standards_version
-  if [ "$JSON_TOOL" = "jq" ]; then
-    standards_version=$(jq -r '.version' "$STANDARDS_FILE")
-  else
-    standards_version=$(node -e "
-      const fs = require('fs'), path = require('path');
-      const d = JSON.parse(fs.readFileSync(path.resolve(process.argv[1]), 'utf8'));
-      console.log(d.version);
-    " -- "$STANDARDS_FILE")
-  fi
-  echo -e "${DIM}Standards version: $standards_version | $(date +%Y-%m-%d)${NC}"
+  echo -e "${DIM}Standards version: $STD_VERSION | $(date +%Y-%m-%d)${NC}"
   echo ""
 
   local dev_root
@@ -685,8 +657,8 @@ ${BOLD}Exit codes:${NC}
   2  Critical-severity failures
 
 ${BOLD}Standards:${NC}
-  $(get_check_count) checks across 4 severity levels (critical, high, medium, low)
-  Version: $(json_query "$STANDARDS_FILE" "version")
+  $STD_COUNT checks across 4 severity levels (critical, high, medium, low)
+  Version: $STD_VERSION
 EOF
 }
 
