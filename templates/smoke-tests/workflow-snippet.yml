@@ -18,6 +18,10 @@
 
       - name: Rollback on smoke failure
         if: failure() && steps.smoke.outcome == 'failure'
+        env:
+          # These must be defined at the workflow/job level (e.g. env: block)
+          SERVICE_NAME: ${{ env.SERVICE_NAME }}
+          REGION: ${{ env.REGION }}
         run: |
           echo "::error::Smoke tests failed — rolling back to previous revision"
           PREV_REV=$(gcloud run revisions list \
