@@ -6,15 +6,26 @@
   "target": "python-fastmcp",
   "checks": [
     {
-      "id": "SEC-001",
-      "name": "Non-root Docker user",
+      "id": "SEC-001a",
+      "name": "Dockerfile has USER directive",
       "severity": "critical",
       "category": "security",
-      "description": "Dockerfile must create and switch to a non-root user",
+      "description": "Dockerfile must switch to a non-root user via USER directive",
       "type": "file_contains",
       "path": "Dockerfile",
-      "pattern": "^USER\\s+(?!root)\\w+",
+      "pattern": "^USER[[:space:]]+[a-zA-Z]",
       "remediation": "Add: RUN useradd -m appuser && chown -R appuser:appuser /app\\nUSER appuser"
+    },
+    {
+      "id": "SEC-001b",
+      "name": "Dockerfile USER is not root",
+      "severity": "critical",
+      "category": "security",
+      "description": "Dockerfile USER directive must not be set to root",
+      "type": "file_not_contains",
+      "path": "Dockerfile",
+      "pattern": "^USER[[:space:]]+root",
+      "remediation": "Change USER root to USER appuser (create user first with useradd)"
     },
     {
       "id": "SEC-002",

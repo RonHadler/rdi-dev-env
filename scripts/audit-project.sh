@@ -49,26 +49,13 @@ else
 fi
 
 # ── JSON helpers ─────────────────────────────────────────────
-# Read a JSON file safely with node (handles Windows/Git Bash paths)
-node_json() {
-  local file="$1"
-  shift
-  node -e "
-    const fs = require('fs'), path = require('path');
-    const fp = path.resolve(process.argv[1]);
-    const data = JSON.parse(fs.readFileSync(fp, 'utf8'));
-    const args = process.argv.slice(2);
-    ${1}
-  " -- "$file" "${@:2}" 2>/dev/null
-}
-
 # Extract a field from JSON using jq or node
 json_query() {
   local file="$1"
   local query="$2"
 
   if [ "$JSON_TOOL" = "jq" ]; then
-    jq -r "$query" "$file" 2>/dev/null
+    jq -r ".$query" "$file" 2>/dev/null
   else
     node -e "
       const fs = require('fs'), path = require('path');
@@ -207,7 +194,7 @@ run_check() {
 
       local found=false
       for f in "${target_files[@]}"; do
-        if grep -qEi "$check_pattern" "$f" 2>/dev/null; then
+        if grep -qEi -- "$check_pattern" "$f" 2>/dev/null; then
           found=true
           break
         fi
@@ -223,11 +210,19 @@ run_check() {
     file_not_contains)
       local target_files=()
       if [[ "$check_path" == *"*"* ]]; then
-        local find_name
-        find_name=$(basename "$check_path")
+        # Glob pattern — find matching files
         while IFS= read -r -d '' f; do
           target_files+=("$f")
-        done < <(find "$project_dir" -path "$project_dir/.venv" -prune -o -path "$project_dir/.git" -prune -o -name "$find_name" -print0 2>/dev/null)
+        done < <(find "$project_dir" -path "$project_dir/.venv" -prune -o -path "$project_dir/.git" -prune -o -path "$project_dir/node_modules" -prune -o -path "$project_dir/$check_path" -print0 2>/dev/null)
+
+        # Fallback to basename matching if find -path didn't match
+        if [ ${#target_files[@]} -eq 0 ]; then
+          local find_name
+          find_name=$(basename "$check_path")
+          while IFS= read -r -d '' f; do
+            target_files+=("$f")
+          done < <(find "$project_dir" -path "$project_dir/.venv" -prune -o -path "$project_dir/.git" -prune -o -name "$find_name" -print0 2>/dev/null)
+        fi
       else
         if [ -f "$project_dir/$check_path" ]; then
           target_files=("$project_dir/$check_path")
@@ -241,7 +236,7 @@ run_check() {
 
       local violation=false
       for f in "${target_files[@]}"; do
-        if grep -qEi "$check_pattern" "$f" 2>/dev/null; then
+        if grep -qEi -- "$check_pattern" "$f" 2>/dev/null; then
           violation=true
           break
         fi
@@ -271,7 +266,8 @@ collect_upstream_candidates() {
   # Check for multi-stage Docker build
   if [ -f "$project_dir/Dockerfile" ]; then
     local stages
-    stages=$(grep -c "^FROM " "$project_dir/Dockerfile" 2>/dev/null || echo "0")
+    stages=$(grep -c "^FROM " "$project_dir/Dockerfile" 2>/dev/null || true)
+    [ -z "$stages" ] && stages=0
     if [ "$stages" -gt 1 ]; then
       UPSTREAM_CANDIDATES+=("Multi-stage Dockerfile ($stages stages)")
     fi
@@ -290,7 +286,8 @@ collect_upstream_candidates() {
   # Check for domain-specific test fixtures beyond the template
   if [ -f "$project_dir/tests/conftest.py" ]; then
     local fixture_count
-    fixture_count=$(grep -c "@pytest.fixture" "$project_dir/tests/conftest.py" 2>/dev/null || echo "0")
+    fixture_count=$(grep -c "@pytest.fixture" "$project_dir/tests/conftest.py" 2>/dev/null || true)
+    [ -z "$fixture_count" ] && fixture_count=0
     if [ "$fixture_count" -gt 2 ]; then
       UPSTREAM_CANDIDATES+=("Rich test fixtures ($fixture_count fixtures in conftest.py)")
     fi
@@ -458,7 +455,8 @@ EOF
   # ── Generate tasks output ──
   if [ "$output_mode" = "tasks" ]; then
     local task_num=1
-    local tasks_json="{\"version\":\"1.0\",\"project\":\"$project_name\",\"generated_by\":\"rdi-audit\",\"generated_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"tasks\":["
+    local tasks_json
+    tasks_json="{\"version\":\"1.0\",\"project\":\"$project_name\",\"generated_by\":\"rdi-audit\",\"generated_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"tasks\":["
     local first_task=true
 
     for ((i=0; i<${#result_ids[@]}; i++)); do
@@ -481,7 +479,7 @@ EOF
 
         # Escape remediation for JSON
         local safe_remediation
-        safe_remediation=$(echo "${result_remediations[$i]}" | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
+        safe_remediation=$(echo "${result_remediations[$i]}" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
 
         tasks_json+="{\"id\":\"TASK-$(printf '%03d' $task_num)\",\"status\":\"pending\",\"priority\":$priority,\"title\":\"${result_ids[$i]}: ${result_names[$i]}\",\"description\":\"$safe_remediation\",\"blocked_by\":[],\"verification\":{\"test_command\":\"rdi-audit $project_dir --json\",\"check_patterns\":[\"${result_ids[$i]}\"]},\"commit_type\":\"$commit_type\",\"attempts\":0,\"max_attempts\":3}"
         ((task_num++)) || true
@@ -621,7 +619,7 @@ show_dashboard() {
       continue
     fi
 
-    local score pass fail skip critical_fails upstream status_icon status_color
+    local score pass fail skip critical_fails upstream status_icon
     if [ "$JSON_TOOL" = "jq" ]; then
       score=$(echo "$json_result" | jq -r '.score')
       pass=$(echo "$json_result" | jq -r '.pass')
