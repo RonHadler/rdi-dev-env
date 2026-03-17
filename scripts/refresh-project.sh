@@ -39,6 +39,15 @@ PYTHON_CMD="python3"
 if ! python3 --version &>/dev/null; then
   PYTHON_CMD="python"
 fi
+if ! command -v "$PYTHON_CMD" &>/dev/null; then
+  echo -e "${RED}Error:${NC} Python not found (need python3 or python)" >&2
+  exit 1
+fi
+
+# ── Cleanup temp files on exit ───────────────────────────────
+TMPFILES=()
+cleanup() { rm -f "${TMPFILES[@]}" 2>/dev/null; }
+trap cleanup EXIT
 
 # ── Managed file manifest ────────────────────────────────────
 # Format: "template_source:project_destination"
@@ -141,11 +150,12 @@ process_file() {
   # Generate processed content into a temp file (avoids variable truncation)
   local tmpfile
   tmpfile=$(mktemp)
+  TMPFILES+=("$tmpfile")
   apply_substitutions < "$template_path" > "$tmpfile"
 
   # Check if destination exists and compare
   if [ -f "$dest_path" ]; then
-    if diff -q "$tmpfile" "$dest_path" >/dev/null 2>&1; then
+    if cmp -s "$tmpfile" "$dest_path"; then
       echo -e "  ${DIM}-${NC} $dest_rel — already up to date"
       rm -f "$tmpfile"
       return 0
@@ -295,7 +305,14 @@ main() {
     echo -e "${BOLD}Generating tasks for remaining gaps...${NC}"
     local audit_script="$DEV_ENV_DIR/scripts/audit-project.sh"
     if [ -f "$audit_script" ]; then
-      bash "$audit_script" "$project_dir" --generate-tasks > "$project_dir/tasks.json"
+      bash "$audit_script" "$project_dir" --generate-tasks > "$project_dir/tasks.json.tmp" 2>/dev/null || true
+      if [ -s "$project_dir/tasks.json.tmp" ]; then
+        mv "$project_dir/tasks.json.tmp" "$project_dir/tasks.json"
+      else
+        rm -f "$project_dir/tasks.json.tmp"
+        echo -e "  ${RED}x${NC} Audit failed — no tasks generated"
+        return 0
+      fi
       local task_count
       task_count=$($PYTHON_CMD -c "
 import json, sys
