@@ -163,7 +163,7 @@ process_file() {
 
     if [ "$apply" = "true" ]; then
       mkdir -p "$(dirname "$dest_path")"
-      mv "$tmpfile" "$dest_path"
+      cat "$tmpfile" > "$dest_path" && rm -f "$tmpfile"
       echo -e "  ${GREEN}↻${NC} $dest_rel — updated"
       ((UPDATED++)) || true
     else
@@ -174,7 +174,7 @@ process_file() {
   else
     if [ "$apply" = "true" ]; then
       mkdir -p "$(dirname "$dest_path")"
-      mv "$tmpfile" "$dest_path"
+      cat "$tmpfile" > "$dest_path" && rm -f "$tmpfile"
       echo -e "  ${GREEN}+${NC} $dest_rel — created"
       ((CREATED++)) || true
     else
