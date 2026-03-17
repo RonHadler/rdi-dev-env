@@ -94,7 +94,7 @@ print(f"{name}\t{pkg}\t{pkg.upper()}\t{name.replace('-', ' ').title()}\t{desc}")
 PYEOF
 )
   local metadata
-  if ! metadata=$($PYTHON_CMD -c "$py_script" "$pyproject" 2>/dev/null); then
+  if ! metadata=$("$PYTHON_CMD" -c "$py_script" "$pyproject" 2>/dev/null); then
     echo -e "${RED}Error:${NC} Could not parse pyproject.toml (file may be malformed, or requires Python 3.11+ / 'tomli')" >&2
     return 1
   fi
@@ -305,6 +305,7 @@ main() {
     echo -e "${BOLD}Generating tasks for remaining gaps...${NC}"
     local audit_script="$DEV_ENV_DIR/scripts/audit-project.sh"
     if [ -f "$audit_script" ]; then
+      TMPFILES+=("$project_dir/tasks.json.tmp")
       bash "$audit_script" "$project_dir" --generate-tasks > "$project_dir/tasks.json.tmp" 2>/dev/null || true
       if [ -s "$project_dir/tasks.json.tmp" ]; then
         mv "$project_dir/tasks.json.tmp" "$project_dir/tasks.json"
@@ -314,7 +315,7 @@ main() {
         return 0
       fi
       local task_count
-      task_count=$($PYTHON_CMD -c "
+      task_count=$("$PYTHON_CMD" -c "
 import json, sys
 with open(sys.argv[1]) as f:
     print(len(json.load(f).get('tasks', [])))
