@@ -401,14 +401,14 @@ audit_project() {
       [ "$i" -gt 0 ] && upstream_json+=","
       # Escape quotes in candidate descriptions
       local safe_candidate
-      safe_candidate=$(echo "${UPSTREAM_CANDIDATES[$i]}" | sed 's/"/\\"/g')
+      safe_candidate=$(printf '%s' "${UPSTREAM_CANDIDATES[$i]}" | sed 's/\\/\\\\/g; s/"/\\"/g')
       upstream_json+="\"$safe_candidate\""
     done
     upstream_json+="]"
 
     local safe_project_name safe_project_dir
-    safe_project_name=$(echo "$project_name" | sed 's/\\/\\\\/g; s/"/\\"/g')
-    safe_project_dir=$(echo "$project_dir" | sed 's/\\/\\\\/g; s/"/\\"/g')
+    safe_project_name=$(printf '%s' "$project_name" | sed 's/\\/\\\\/g; s/"/\\"/g')
+    safe_project_dir=$(printf '%s' "$project_dir" | sed 's/\\/\\\\/g; s/"/\\"/g')
 
     cat <<EOF
 {
@@ -437,7 +437,9 @@ EOF
     local task_num=1
     local tasks_json
     local safe_name
-    safe_name=$(echo "$project_name" | sed 's/\\/\\\\/g; s/"/\\"/g')
+    local safe_dir
+    safe_name=$(printf '%s' "$project_name" | sed 's/\\/\\\\/g; s/"/\\"/g')
+    safe_dir=$(printf '%s' "$project_dir" | sed 's/\\/\\\\/g; s/"/\\"/g')
     tasks_json="{\"version\":\"1.0\",\"project\":\"$safe_name\",\"generated_by\":\"rdi-audit\",\"generated_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"tasks\":["
     local first_task=true
 
@@ -461,9 +463,9 @@ EOF
 
         # Escape remediation for JSON
         local safe_remediation
-        safe_remediation=$(echo "${result_remediations[$i]}" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
+        safe_remediation=$(printf '%s' "${result_remediations[$i]}" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
 
-        tasks_json+="{\"id\":\"TASK-$(printf '%03d' $task_num)\",\"status\":\"pending\",\"priority\":$priority,\"title\":\"${result_ids[$i]}: ${result_names[$i]}\",\"description\":\"$safe_remediation\",\"blocked_by\":[],\"verification\":{\"test_command\":\"rdi-audit $project_dir --json\",\"check_patterns\":[\"${result_ids[$i]}\"]},\"commit_type\":\"$commit_type\",\"attempts\":0,\"max_attempts\":3}"
+        tasks_json+="{\"id\":\"TASK-$(printf '%03d' $task_num)\",\"status\":\"pending\",\"priority\":$priority,\"title\":\"${result_ids[$i]}: ${result_names[$i]}\",\"description\":\"$safe_remediation\",\"blocked_by\":[],\"verification\":{\"test_command\":\"rdi-audit \\\"$safe_dir\\\" --json\",\"check_patterns\":[\"${result_ids[$i]}\"]},\"commit_type\":\"$commit_type\",\"attempts\":0,\"max_attempts\":3}"
         ((task_num++)) || true
       fi
     done
@@ -674,31 +676,49 @@ main() {
     exit 0
   fi
 
-  local project_dir="$1"
+  # Parse arguments — flags and path can appear in any order
+  local project_dir=""
   local mode="text"
+  local reverse_only=false
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --json) mode="json" ;;
+      --generate-tasks) mode="tasks" ;;
+      --reverse) reverse_only=true ;;
+      --help|-h) usage; exit 0 ;;
+      -*)
+        echo -e "${RED}Unknown option:${NC} $1" >&2; exit 1 ;;
+      *)
+        if [ -z "$project_dir" ]; then
+          project_dir="$1"
+        else
+          echo -e "${RED}Unexpected argument:${NC} $1" >&2; exit 1
+        fi
+        ;;
+    esac
+    shift
+  done
+
+  if [ -z "$project_dir" ]; then
+    echo -e "${RED}Error:${NC} No project path specified" >&2
+    usage
+    exit 1
+  fi
 
   # Resolve relative paths
   if [[ ! "$project_dir" = /* ]]; then
     project_dir="$(pwd)/$project_dir"
   fi
 
-  # Strip trailing slash
+  # Strip trailing slash (guard against bare /)
   project_dir="${project_dir%/}"
+  [ -z "$project_dir" ] && project_dir="/"
 
-  shift || true
-
-  while [ $# -gt 0 ]; do
-    case "$1" in
-      --json) mode="json" ;;
-      --generate-tasks) mode="tasks" ;;
-      --reverse)
-        reverse_audit "$project_dir"
-        exit 0
-        ;;
-      *) echo -e "${RED}Unknown option:${NC} $1" >&2; exit 1 ;;
-    esac
-    shift
-  done
+  if $reverse_only; then
+    reverse_audit "$project_dir"
+    exit 0
+  fi
 
   audit_project "$project_dir" "$mode"
 }
