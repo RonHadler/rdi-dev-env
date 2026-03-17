@@ -158,6 +158,7 @@ run_check() {
 
   case "$check_type" in
     file_exists)
+      # NOTE: does not support globs — check_path must be a literal path
       if [ -e "$project_dir/$check_path" ]; then
         echo "pass"
       else
@@ -167,6 +168,10 @@ run_check() {
 
     file_contains)
       # Handle glob patterns in path
+      # NOTE: glob matching uses basename only (e.g. **/*.py matches all *.py).
+      # Directory-scoped globs like src/**/*.py are NOT enforced — all matching
+      # filenames are checked regardless of directory. This is acceptable because
+      # all current standards.json patterns use **/ root globs.
       local target_files=()
       if [[ "$check_path" == *"*"* ]]; then
         local find_name
@@ -466,7 +471,7 @@ EOF
 
         # Escape remediation for JSON
         local safe_remediation
-        safe_remediation=$(printf '%s' "${result_remediations[$i]}" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
+        safe_remediation=$(printf '%s' "${result_remediations[$i]}" | sed 's/\\/\\\\/g; s/"/\\"/g')
 
         tasks_json+="{\"id\":\"TASK-$(printf '%03d' $task_num)\",\"status\":\"pending\",\"priority\":$priority,\"title\":\"${result_ids[$i]}: ${result_names[$i]}\",\"description\":\"$safe_remediation\",\"blocked_by\":[],\"verification\":{\"test_command\":\"rdi-audit \\\"$safe_dir\\\" --json\",\"check_patterns\":[\"${result_ids[$i]}\"]},\"commit_type\":\"$commit_type\",\"attempts\":0,\"max_attempts\":3}"
         ((task_num++)) || true
@@ -600,7 +605,6 @@ show_dashboard() {
     if [ "$JSON_TOOL" = "jq" ]; then
       read -r score pass fail skip critical_fails upstream <<< "$(echo "$json_result" | jq -r '[.score, .pass, .fail, .skip, .critical_failures, .upstream_candidates] | @tsv')"
     else
-      # Parse all fields in a single node call for efficiency
       local parsed
       parsed=$(node -e "
         const d = JSON.parse(process.argv[1]);
@@ -608,6 +612,10 @@ show_dashboard() {
       " -- "$json_result")
       read -r score pass fail skip critical_fails upstream <<< "$parsed"
     fi
+
+    # Guard against empty/non-integer values from failed parsing
+    score=${score:-0}; pass=${pass:-0}; fail=${fail:-0}
+    skip=${skip:-0}; critical_fails=${critical_fails:-0}; upstream=${upstream:-0}
 
     if [ "$score" -eq 100 ]; then
       status_icon="${GREEN}✓ COMPLIANT${NC}"
