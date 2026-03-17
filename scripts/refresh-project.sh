@@ -60,51 +60,37 @@ extract_metadata() {
   fi
 
   # Use Python's tomllib for robust TOML parsing (Python 3.11+)
-  local python_cmd="python3"
+  PYTHON_CMD="python3"
   if ! python3 --version &>/dev/null; then
-    python_cmd="python"
+    PYTHON_CMD="python"
   fi
 
+  # Output TSV directly from Python — no jq/node dependency needed
   local py_script
   py_script=$(cat <<'PYEOF'
-import tomllib, json, sys
+import sys
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib
+    except ImportError:
+        sys.exit(1)
 with open(sys.argv[1], "rb") as f:
-    data = tomllib.load(f)
-p = data.get("project", {})
+    p = tomllib.load(f).get("project", {})
 name = p.get("name", "")
-desc = p.get("description", "")
+desc = p.get("description", "").replace("\n", " ").replace("\t", " ").strip()
 pkg = name.replace("-", "_")
-upper = pkg.upper()
-display = name.replace("-", " ").title()
-print(json.dumps({"name": name, "pkg": pkg, "upper": upper, "display": display, "desc": desc}))
+print(f"{name}\t{pkg}\t{pkg.upper()}\t{name.replace('-', ' ').title()}\t{desc}")
 PYEOF
 )
   local metadata
-  metadata=$($python_cmd -c "$py_script" "$pyproject" 2>/dev/null) || true
-
-  if [ -z "$metadata" ]; then
-    echo -e "${RED}Error:${NC} Could not parse pyproject.toml (requires Python 3.11+)" >&2
+  if ! metadata=$($PYTHON_CMD -c "$py_script" "$pyproject" 2>/dev/null); then
+    echo -e "${RED}Error:${NC} Could not parse pyproject.toml (requires Python 3.11+ or 'tomli' package)" >&2
     return 1
   fi
 
-  # Extract fields from JSON (works with jq or node)
-  if command -v jq &>/dev/null; then
-    PROJECT_NAME=$(printf '%s' "$metadata" | jq -r '.name')
-    PACKAGE_NAME=$(printf '%s' "$metadata" | jq -r '.pkg')
-    UPPER_PACKAGE_NAME=$(printf '%s' "$metadata" | jq -r '.upper')
-    DISPLAY_NAME=$(printf '%s' "$metadata" | jq -r '.display')
-    DESCRIPTION=$(printf '%s' "$metadata" | jq -r '.desc')
-  elif command -v node &>/dev/null; then
-    local parsed
-    parsed=$(node -e "
-      const d = JSON.parse(process.argv[1]);
-      console.log([d.name, d.pkg, d.upper, d.display, d.desc].join('\t'));
-    " -- "$metadata")
-    IFS=$'\t' read -r PROJECT_NAME PACKAGE_NAME UPPER_PACKAGE_NAME DISPLAY_NAME DESCRIPTION <<< "$parsed"
-  else
-    echo -e "${RED}Error:${NC} Either jq or node is required" >&2
-    return 1
-  fi
+  IFS=$'\t' read -r PROJECT_NAME PACKAGE_NAME UPPER_PACKAGE_NAME DISPLAY_NAME DESCRIPTION <<< "$metadata"
 
   if [ -z "$PROJECT_NAME" ]; then
     echo -e "${RED}Error:${NC} Could not extract project name from $pyproject" >&2
@@ -310,23 +296,20 @@ main() {
     local audit_script="$DEV_ENV_DIR/scripts/audit-project.sh"
     if [ -f "$audit_script" ]; then
       bash "$audit_script" "$project_dir" --generate-tasks > "$project_dir/tasks.json"
-      local task_count=0
-      if command -v jq &>/dev/null; then
-        task_count=$(jq '.tasks | length' "$project_dir/tasks.json" 2>/dev/null || echo "0")
-      elif command -v node &>/dev/null; then
-        task_count=$(node -e "
-          const fs = require('fs'), path = require('path');
-          const d = JSON.parse(fs.readFileSync(path.resolve(process.argv[1]), 'utf8'));
-          console.log(d.tasks.length);
-        " -- "$project_dir/tasks.json" 2>/dev/null || echo "0")
-      else
-        echo -e "  ${YELLOW}~${NC} tasks.json — created (install jq or node to see task count)"
-      fi
+      local task_count
+      task_count=$($PYTHON_CMD -c "
+import json, sys
+with open(sys.argv[1]) as f:
+    print(len(json.load(f).get('tasks', [])))
+" "$project_dir/tasks.json" 2>/dev/null) || task_count=-1
+
       if [ "$task_count" -gt 0 ]; then
         echo -e "  ${GREEN}+${NC} tasks.json — $task_count remaining task(s) for project agent"
-      else
+      elif [ "$task_count" -eq 0 ]; then
         echo -e "  ${DIM}-${NC} tasks.json — no remaining tasks (fully compliant!)"
         rm -f "$project_dir/tasks.json"
+      else
+        echo -e "  ${GREEN}+${NC} tasks.json — created (could not count tasks)"
       fi
     else
       echo -e "  ${YELLOW}~${NC} Audit script not found — skipping task generation"
