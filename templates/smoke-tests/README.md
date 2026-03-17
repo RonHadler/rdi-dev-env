@@ -67,6 +67,6 @@ See `workflow-snippet.yml` for GitHub Actions integration with Cloud Run deploym
 ## How It Works
 
 1. `conftest.py` reads `SMOKE_TEST_URL` — if unset, all smoke tests skip gracefully
-2. `mcp_client` fixture connects via FastMCP `Client` (module-scoped for connection reuse)
+2. `mcp_client` fixture connects via FastMCP `Client` (function-scoped for pytest-asyncio compatibility)
 3. Tests call `list_tools()` and `call_tool()` against the live server
 4. In CI, failures after deployment trigger automatic rollback

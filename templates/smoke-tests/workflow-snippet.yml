@@ -21,15 +21,15 @@
         run: |
           echo "::error::Smoke tests failed — rolling back to previous revision"
           PREV_REV=$(gcloud run revisions list \
-            --service=${{ env.SERVICE_NAME }} \
-            --region=${{ env.REGION }} \
+            --service="$SERVICE_NAME" \
+            --region="$REGION" \
             --sort-by=~metadata.creationTimestamp \
             --format='value(metadata.name)' \
             --limit=2 | tail -n 1)
           if [ -n "$PREV_REV" ]; then
-            gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
-              --region=${{ env.REGION }} \
-              --to-revisions=$PREV_REV=100
+            gcloud run services update-traffic "$SERVICE_NAME" \
+              --region="$REGION" \
+              --to-revisions="$PREV_REV=100"
             echo "Rolled back to revision: $PREV_REV"
           else
             echo "::warning::No previous revision found — cannot rollback"
