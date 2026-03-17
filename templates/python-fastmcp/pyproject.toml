@@ -47,6 +47,9 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 pythonpath = ["."]
 testpaths = ["tests"]
+markers = [
+    "smoke: tests against a deployed server (skipped when SMOKE_TEST_URL unset)",
+]
 
 [tool.uv]
 package = true

@@ -1,0 +1,25 @@
+# Smoke test steps for deploy-cloudrun.yml
+# Insert AFTER the health check step, BEFORE the rollback step.
+#
+# Prerequisites:
+#   - SMOKE_TEST_AUTH_TOKEN secret (optional, for authenticated servers)
+#   - tests/smoke/ directory with smoke tests
+#   - pyproject.toml with smoke marker configured
+
+      # ── Smoke Tests ──
+      - name: Run smoke tests
+        if: steps.health.outcome == 'success'
+        env:
+          SMOKE_TEST_URL: ${{ steps.deploy.outputs.url }}/mcp
+          SMOKE_TEST_AUTH_TOKEN: ${{ secrets.SMOKE_TEST_AUTH_TOKEN }}
+        run: |
+          uv sync --frozen --no-dev --extra smoke 2>/dev/null || uv sync --frozen
+          uv run pytest tests/smoke/ -v -m smoke --tb=short
+
+      - name: Rollback on smoke failure
+        if: failure() && steps.deploy.outcome == 'success'
+        run: |
+          echo "::error::Smoke tests failed — rolling back deployment"
+          gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
+            --region=${{ env.REGION }} \
+            --to-revisions=LATEST=0
