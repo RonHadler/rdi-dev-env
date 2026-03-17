@@ -1,4 +1,4 @@
-.PHONY: dev-serve dev-stdio test test-quick lint format type-check build clean
+.PHONY: dev-serve dev-stdio test test-quick smoke lint format type-check build clean
 
 # ── Development ──────────────────────────────────────────────
 
@@ -15,6 +15,9 @@ test:  ## Run tests with coverage
 
 test-quick:  ## Run tests without coverage
 	uv run pytest -v
+
+smoke:  ## Run smoke tests against deployed server
+	uv run pytest tests/smoke/ -v -m smoke --tb=short
 
 # ── Code Quality ─────────────────────────────────────────────
 

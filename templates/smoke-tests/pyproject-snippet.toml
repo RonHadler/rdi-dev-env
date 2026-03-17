@@ -1,0 +1,6 @@
+# Add this line to [tool.pytest.ini_options] markers list:
+#
+# [tool.pytest.ini_options]
+# markers = [
+#     "smoke: tests against a deployed server (skipped when SMOKE_TEST_URL unset)",
+# ]

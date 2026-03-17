@@ -1,0 +1,40 @@
+# Smoke test steps for deploy-cloudrun.yml
+# Insert AFTER the health check step, BEFORE the rollback step.
+#
+# Prerequisites:
+#   - SMOKE_TEST_AUTH_TOKEN secret (optional, for authenticated servers)
+#   - tests/smoke/ directory with smoke tests
+#   - pyproject.toml with smoke marker configured
+
+      # ── Smoke Tests ──
+      - name: Run smoke tests
+        id: smoke
+        env:
+          SMOKE_TEST_URL: ${{ steps.deploy.outputs.url }}/mcp
+          SMOKE_TEST_AUTH_TOKEN: ${{ secrets.SMOKE_TEST_AUTH_TOKEN }}
+        run: |
+          uv sync --frozen --no-dev --extra smoke 2>/dev/null || uv sync --frozen
+          uv run pytest tests/smoke/ -v -m smoke --tb=short
+
+      - name: Rollback on smoke failure
+        if: failure() && steps.smoke.outcome == 'failure'
+        env:
+          # These must be defined at the workflow/job level (e.g. env: block)
+          SERVICE_NAME: ${{ env.SERVICE_NAME }}
+          REGION: ${{ env.REGION }}
+        run: |
+          echo "::error::Smoke tests failed — rolling back to previous revision"
+          PREV_REV=$(gcloud run revisions list \
+            --service="$SERVICE_NAME" \
+            --region="$REGION" \
+            --sort-by=~metadata.creationTimestamp \
+            --format='value(metadata.name)' \
+            --limit=2 | sed -n '2p')
+          if [ -n "$PREV_REV" ]; then
+            gcloud run services update-traffic "$SERVICE_NAME" \
+              --region="$REGION" \
+              --to-revisions="$PREV_REV=100"
+            echo "Rolled back to revision: $PREV_REV"
+          else
+            echo "::warning::No previous revision found — cannot rollback"
+          fi
