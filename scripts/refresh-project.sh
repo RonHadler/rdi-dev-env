@@ -46,7 +46,7 @@ fi
 
 # ── Cleanup temp files on exit ───────────────────────────────
 TMPFILES=()
-cleanup() { rm -f "${TMPFILES[@]}" 2>/dev/null; }
+cleanup() { [ ${#TMPFILES[@]} -gt 0 ] && rm -f "${TMPFILES[@]}" 2>/dev/null || true; }
 trap cleanup EXIT
 
 # ── Managed file manifest ────────────────────────────────────
