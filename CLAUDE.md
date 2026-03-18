@@ -4,9 +4,10 @@ Development environment, templates, and tooling for RDI's Python/FastMCP MCP ser
 
 ## Session Startup
 
-1. **Check upstream candidates** — `docs/upstream-candidates.md` for patterns to bring into templates
-2. **Check compliance plan** — `docs/standards-compliance-plan.md` for current phase and next steps
-3. **Run fleet audit** — `bash scripts/audit-project.sh status` to see current compliance across all projects
+1. **Check current tasks** — `docs/current-tasks.md` for what's in progress and up next
+2. **Check roadmap** — `docs/roadmap.md` for the big picture
+3. **Check upstream candidates** — `docs/upstream-candidates.md` for patterns to bring into templates
+4. **Run fleet audit** — `bash scripts/audit-project.sh status` to see current compliance
 
 ## Key Tools
 
