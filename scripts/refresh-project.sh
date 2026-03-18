@@ -128,6 +128,8 @@ PYEOF
       DEFAULT_BRANCH="$head_ref"
     elif git -C "$project_dir" rev-parse --verify refs/heads/master &>/dev/null; then
       DEFAULT_BRANCH="master"
+    elif git -C "$project_dir" rev-parse --verify refs/heads/main &>/dev/null; then
+      DEFAULT_BRANCH="main"
     else
       # Fallback to current branch (handles repos without remotes)
       local current_branch
