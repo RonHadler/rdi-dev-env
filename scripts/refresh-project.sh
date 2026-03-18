@@ -34,6 +34,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEV_ENV_DIR="$(dirname "$SCRIPT_DIR")"
 TEMPLATES_DIR="$DEV_ENV_DIR/templates"
 
+# ── Globals populated by extract_metadata ─────────────────────
+PROJECT_NAME=""
+PACKAGE_NAME=""
+UPPER_PACKAGE_NAME=""
+DISPLAY_NAME=""
+DESCRIPTION=""
+DEFAULT_BRANCH="main"
+
 # ── Python command (python3 or python) ───────────────────────
 PYTHON_CMD="python3"
 if ! python3 --version &>/dev/null; then

@@ -69,7 +69,7 @@ jobs:
         run: uv sync --frozen
 
       - name: Type check (strict)
-        run: uv run mypy <!-- CUSTOMIZE: package_name -->/ --strict
+        run: "uv run mypy <!-- CUSTOMIZE: package_name -->/ --strict"
 
   # ── Tests + Coverage ──────────────────────────────────────────
   test:
