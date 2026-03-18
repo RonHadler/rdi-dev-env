@@ -246,6 +246,17 @@
       "path": "CLAUDE.md",
       "pattern": "tasks\\.json",
       "remediation": "Add tasks.json check to Session Startup Checklist in CLAUDE.md"
+    },
+    {
+      "id": "CON-008",
+      "name": "No uncustomized template markers",
+      "severity": "medium",
+      "category": "consistency",
+      "description": "Project files should not contain leftover <!-- CUSTOMIZE --> markers from templates",
+      "type": "file_not_contains",
+      "path": "**/*.md",
+      "pattern": "<!-- CUSTOMIZE",
+      "remediation": "Replace all <!-- CUSTOMIZE --> markers with project-specific values"
     }
   ],
   "baseline_spec": {

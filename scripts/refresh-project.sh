@@ -60,7 +60,11 @@ MANAGED_FILES=(
   # CI workflows (no substitutions needed)
   "github-workflows/stale.yml:.github/workflows/stale.yml"
   "github-workflows/dependabot.yml:.github/dependabot.yml"
-  # Review standards
+)
+
+# Seeded files — created once if missing, never overwritten.
+# Project owns these after initial creation.
+SEEDED_FILES=(
   "GEMINI.md:GEMINI.md"
 )
 
@@ -277,7 +281,10 @@ main() {
   WOULD_UPDATE=0
   WOULD_CREATE=0
 
-  echo -e "${BOLD}Managed Files${NC}"
+  local SEEDED_CREATED=0
+  local SEEDED_WOULD_CREATE=0
+
+  echo -e "${BOLD}Managed Files${NC} ${DIM}(owned by rdi-dev-env — safe to overwrite)${NC}"
   for entry in "${MANAGED_FILES[@]}"; do
     local template_rel="${entry%%:*}"
     local dest_rel="${entry##*:}"
@@ -285,16 +292,41 @@ main() {
   done
 
   echo ""
+  echo -e "${BOLD}Seeded Files${NC} ${DIM}(created once, then project-owned)${NC}"
+  for entry in "${SEEDED_FILES[@]}"; do
+    local template_rel="${entry%%:*}"
+    local dest_rel="${entry##*:}"
+    local dest_path="$project_dir/$dest_rel"
+
+    if [ -e "$dest_path" ]; then
+      echo -e "  ${DIM}-${NC} $dest_rel — already exists (project-owned, skipping)"
+    elif $apply; then
+      local tmpfile
+      tmpfile=$(mktemp)
+      TMPFILES+=("$tmpfile")
+      apply_substitutions < "$TEMPLATES_DIR/$template_rel" > "$tmpfile"
+      mkdir -p "$(dirname "$dest_path")"
+      cat "$tmpfile" > "$dest_path" && rm -f "$tmpfile"
+      echo -e "  ${GREEN}+${NC} $dest_rel — created (customize <!-- CUSTOMIZE --> markers)"
+      ((SEEDED_CREATED++)) || true
+    else
+      echo -e "  ${YELLOW}+${NC} $dest_rel — would create"
+      ((SEEDED_WOULD_CREATE++)) || true
+    fi
+  done
+
+  echo ""
 
   # Summary
+  local total_created=$((CREATED + SEEDED_CREATED))
+  local total_would=$((WOULD_CREATE + WOULD_UPDATE + SEEDED_WOULD_CREATE))
   if $apply; then
-    echo -e "${BOLD}Summary:${NC} ${GREEN}$CREATED created${NC}, ${GREEN}$UPDATED updated${NC}"
+    echo -e "${BOLD}Summary:${NC} ${GREEN}$total_created created${NC}, ${GREEN}$UPDATED updated${NC}"
   else
-    local total=$((WOULD_CREATE + WOULD_UPDATE))
-    if [ "$total" -eq 0 ]; then
-      echo -e "${GREEN}All managed files are up to date.${NC}"
+    if [ "$total_would" -eq 0 ]; then
+      echo -e "${GREEN}All files are up to date.${NC}"
     else
-      echo -e "${BOLD}Summary:${NC} ${YELLOW}$WOULD_CREATE to create${NC}, ${YELLOW}$WOULD_UPDATE to update${NC}"
+      echo -e "${BOLD}Summary:${NC} ${YELLOW}$((WOULD_CREATE + SEEDED_WOULD_CREATE)) to create${NC}, ${YELLOW}$WOULD_UPDATE to update${NC}"
       echo -e "${DIM}Run with --apply to write changes.${NC}"
     fi
   fi
