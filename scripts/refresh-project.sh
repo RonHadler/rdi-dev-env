@@ -298,7 +298,7 @@ main() {
     local dest_rel="${entry##*:}"
     local dest_path="$project_dir/$dest_rel"
 
-    if [ -f "$dest_path" ]; then
+    if [ -e "$dest_path" ]; then
       echo -e "  ${DIM}-${NC} $dest_rel — already exists (project-owned, skipping)"
     elif $apply; then
       local tmpfile
