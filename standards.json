@@ -184,7 +184,7 @@
       "description": "uv.lock must not be in .gitignore (breaks --frozen CI builds)",
       "type": "file_not_contains",
       "path": ".gitignore",
-      "pattern": "/?uv\\.lock",
+      "pattern": "^/?uv\\.lock",
       "remediation": "Remove 'uv.lock' from .gitignore — it must be committed for reproducible builds"
     },
     {
