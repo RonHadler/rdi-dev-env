@@ -2,14 +2,14 @@ name: CI Pipeline
 
 on:
   push:
-    branches: [<!-- CUSTOMIZE: default_branch -->]
+    branches: ["<!-- CUSTOMIZE: default_branch -->"]
     paths-ignore:
       - '**.md'
       - 'docs/**'
       - 'LICENSE'
       - '.gitignore'
   pull_request:
-    branches: [<!-- CUSTOMIZE: default_branch -->]
+    branches: ["<!-- CUSTOMIZE: default_branch -->"]
     paths-ignore:
       - '**.md'
       - 'docs/**'
