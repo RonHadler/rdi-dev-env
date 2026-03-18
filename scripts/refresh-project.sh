@@ -112,7 +112,7 @@ PYEOF
 
   # Detect default branch from git
   DEFAULT_BRANCH="main"
-  if [ -d "$project_dir/.git" ]; then
+  if git -C "$project_dir" rev-parse --git-dir &>/dev/null; then
     # Try HEAD reference first, then fall back to common names
     local head_ref
     head_ref=$(git -C "$project_dir" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||') || true
