@@ -1,25 +1,15 @@
-# CI Pipeline — Python/FastMCP
-# Copy to: .github/workflows/ci.yml
-#
-# PREREQUISITES:
-#   1. Python project using uv as package manager
-#   2. pyproject.toml with ruff, mypy, pytest configured
-#   3. Makefile with test, lint, type-check targets (optional)
-#
-# CUSTOMIZE: Update PYTHON_VERSION, COVERAGE_THRESHOLD, and mypy target path.
-
 name: CI Pipeline
 
 on:
   push:
-    branches: [main, develop]
+    branches: ["<!-- CUSTOMIZE: default_branch -->"]
     paths-ignore:
       - '**.md'
       - 'docs/**'
       - 'LICENSE'
       - '.gitignore'
   pull_request:
-    branches: [main, develop]
+    branches: ["<!-- CUSTOMIZE: default_branch -->"]
     paths-ignore:
       - '**.md'
       - 'docs/**'
@@ -35,7 +25,6 @@ concurrency:
 
 env:
   PYTHON_VERSION: '3.12'
-  # <!-- CUSTOMIZE: minimum coverage % (set to 0 to disable) -->
   COVERAGE_THRESHOLD: 80
 
 jobs:
@@ -80,9 +69,7 @@ jobs:
         run: uv sync --frozen
 
       - name: Type check (strict)
-        # <!-- CUSTOMIZE: replace package_name with your Python package -->
-        # CUSTOMIZE: replace package_name with your Python package
-        run: uv run mypy package_name/ --strict
+        run: "uv run mypy <!-- CUSTOMIZE: package_name -->/ --strict"
 
   # ── Tests + Coverage ──────────────────────────────────────────
   test:
@@ -103,7 +90,6 @@ jobs:
 
       - name: Run tests with coverage
         run: |
-          # <!-- CUSTOMIZE: replace package_name with your Python package -->
           uv run pytest tests/ \
             --cov=<!-- CUSTOMIZE: package_name --> \
             --cov-report=term-missing \

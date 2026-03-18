@@ -34,6 +34,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEV_ENV_DIR="$(dirname "$SCRIPT_DIR")"
 TEMPLATES_DIR="$DEV_ENV_DIR/templates"
 
+# ── Globals populated by extract_metadata ─────────────────────
+PROJECT_NAME=""
+PACKAGE_NAME=""
+UPPER_PACKAGE_NAME=""
+DISPLAY_NAME=""
+DESCRIPTION=""
+DEFAULT_BRANCH="main"
+
 # ── Python command (python3 or python) ───────────────────────
 PYTHON_CMD="python3"
 if ! python3 --version &>/dev/null; then
@@ -109,6 +117,28 @@ PYEOF
     echo -e "${RED}Error:${NC} Could not extract project name from $pyproject" >&2
     return 1
   fi
+
+  # Detect default branch from git
+  DEFAULT_BRANCH="main"
+  if git -C "$project_dir" rev-parse --git-dir &>/dev/null; then
+    # Try HEAD reference first, then fall back to common names
+    local head_ref
+    head_ref=$(git -C "$project_dir" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||') || true
+    if [ -n "$head_ref" ]; then
+      DEFAULT_BRANCH="$head_ref"
+    elif git -C "$project_dir" rev-parse --verify refs/heads/master &>/dev/null; then
+      DEFAULT_BRANCH="master"
+    elif git -C "$project_dir" rev-parse --verify refs/heads/main &>/dev/null; then
+      DEFAULT_BRANCH="main"
+    else
+      # Fallback to current branch (handles repos without remotes)
+      local current_branch
+      current_branch=$(git -C "$project_dir" branch --show-current 2>/dev/null) || true
+      if [ -n "$current_branch" ]; then
+        DEFAULT_BRANCH="$current_branch"
+      fi
+    fi
+  fi
 }
 
 # ── Escape a string for use in sed replacement ────────────────
@@ -118,12 +148,13 @@ sed_escape() {
 
 # ── Apply substitutions to a template file (reads from stdin) ─
 apply_substitutions() {
-  local safe_display safe_name safe_pkg safe_upper safe_desc safe_date
+  local safe_display safe_name safe_pkg safe_upper safe_desc safe_date safe_branch
   safe_display=$(sed_escape "$DISPLAY_NAME")
   safe_name=$(sed_escape "$PROJECT_NAME")
   safe_pkg=$(sed_escape "$PACKAGE_NAME")
   safe_upper=$(sed_escape "$UPPER_PACKAGE_NAME")
   safe_desc=$(sed_escape "$DESCRIPTION")
+  safe_branch=$(sed_escape "$DEFAULT_BRANCH")
   safe_date=$(date +%Y-%m-%d)
 
   sed \
@@ -132,6 +163,7 @@ apply_substitutions() {
     -e "s|<!-- CUSTOMIZE: package_name -->|$safe_pkg|g" \
     -e "s|<!-- CUSTOMIZE: PACKAGE_NAME -->|$safe_upper|g" \
     -e "s|<!-- CUSTOMIZE: description -->|$safe_desc|g" \
+    -e "s|<!-- CUSTOMIZE: default_branch -->|$safe_branch|g" \
     -e "s|<!-- CUSTOMIZE: date -->|$safe_date|g" \
     -e "s|# CUSTOMIZE:.*||g"
 }
@@ -267,7 +299,7 @@ main() {
   project_basename=$(basename "$project_dir")
 
   echo -e "${BOLD}rdi-refresh: ${CYAN}$project_basename${NC}"
-  echo -e "${DIM}Project: $PROJECT_NAME | Package: $PACKAGE_NAME${NC}"
+  echo -e "${DIM}Project: $PROJECT_NAME | Package: $PACKAGE_NAME | Branch: $DEFAULT_BRANCH${NC}"
   if $apply; then
     echo -e "${DIM}Mode: apply${NC}"
   else

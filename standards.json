@@ -177,6 +177,39 @@
       "remediation": "Run 'uv lock' and commit the resulting uv.lock file"
     },
     {
+      "id": "QUAL-008",
+      "name": "uv.lock not gitignored",
+      "severity": "medium",
+      "category": "quality",
+      "description": "uv.lock must not be in .gitignore (breaks --frozen CI builds)",
+      "type": "file_not_contains",
+      "path": ".gitignore",
+      "pattern": "^/?uv\\.lock",
+      "remediation": "Remove 'uv.lock' from .gitignore — it must be committed for reproducible builds"
+    },
+    {
+      "id": "QUAL-009",
+      "name": "mypy in dev dependencies",
+      "severity": "medium",
+      "category": "quality",
+      "description": "mypy must be in dev dependencies for CI typecheck to work",
+      "type": "file_contains",
+      "path": "pyproject.toml",
+      "pattern": "mypy",
+      "remediation": "Add mypy>=1.11 to [dependency-groups] dev in pyproject.toml"
+    },
+    {
+      "id": "QUAL-010",
+      "name": "pytest-cov in dev dependencies",
+      "severity": "medium",
+      "category": "quality",
+      "description": "pytest-cov must be in dev dependencies for CI coverage reporting",
+      "type": "file_contains",
+      "path": "pyproject.toml",
+      "pattern": "pytest-cov",
+      "remediation": "Add pytest-cov>=5.0 to [dependency-groups] dev in pyproject.toml"
+    },
+    {
       "id": "CON-001",
       "name": "CLAUDE.md present",
       "severity": "low",
