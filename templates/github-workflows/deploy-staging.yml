@@ -1,0 +1,159 @@
+# Staging Deployment Template
+# Copy to: .github/workflows/deploy-staging.yml
+#
+# PREREQUISITES:
+#   1. ci.yml must exist (this workflow calls it as a gate)
+#   2. Set up Workload Identity Federation in GCP
+#   3. Create deploy service account
+#   4. Add required secrets to GitHub "staging" Environment
+#   5. Ensure Dockerfile exists in repo root
+#
+# CUSTOMIZE: Search for "<!-- CUSTOMIZE" and replace all placeholder values.
+
+name: Deploy to Staging
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Git ref to deploy (branch, tag, or SHA)'
+        required: false
+        default: ''
+        type: string
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+env:
+  GCP_REGION: 'us-central1'                                    # <!-- CUSTOMIZE: GCP region -->
+  SERVICE_NAME: '<!-- CUSTOMIZE: service-name -->-staging'      # <!-- CUSTOMIZE: Cloud Run service name -->
+  HEALTH_CHECK_PATH: '/health'                                  # <!-- CUSTOMIZE: health check endpoint -->
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml  # Run lint + typecheck + tests before deploying
+
+  deploy:
+    needs: [ci]
+    runs-on: ubuntu-latest
+    environment: staging
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.GCP_REGION }}-docker.pkg.dev --quiet
+
+      - name: Build Docker image
+        run: |
+          IMAGE="${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/mcp-repo/${{ env.SERVICE_NAME }}"
+          TAG="$(git rev-parse HEAD)"
+
+          docker build \
+            --tag "${IMAGE}:${TAG}" \
+            --tag "${IMAGE}:latest" \
+            --build-arg BUILD_SHA="${TAG}" \
+            .
+
+          echo "IMAGE=${IMAGE}" >> "$GITHUB_ENV"
+          echo "TAG=${TAG}" >> "$GITHUB_ENV"
+
+      - name: Push to Artifact Registry
+        run: |
+          docker push "${{ env.IMAGE }}:${{ env.TAG }}"
+          docker push "${{ env.IMAGE }}:latest"
+
+      # <!-- CUSTOMIZE: Add service-specific flags (secrets, env vars, Cloud SQL) -->
+      - name: Deploy to Cloud Run
+        id: deploy
+        uses: google-github-actions/deploy-cloudrun@v3
+        with:
+          service: ${{ env.SERVICE_NAME }}
+          region: ${{ env.GCP_REGION }}
+          image: ${{ env.IMAGE }}:${{ env.TAG }}
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          flags: >-
+            --service-account=<!-- CUSTOMIZE: service-account -->
+
+      - name: Get service URL
+        run: |
+          echo "Service URL: ${{ steps.deploy.outputs.url }}"
+          echo "SERVICE_URL=${{ steps.deploy.outputs.url }}" >> "$GITHUB_ENV"
+
+      - name: Health check
+        id: health
+        run: |
+          echo "Checking service readiness via gcloud..."
+
+          for i in 1 2 3 4 5; do
+            echo "Attempt $i/5..."
+            READY=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
+              --region=${{ env.GCP_REGION }} \
+              --project=${{ secrets.GCP_PROJECT_ID }} \
+              --format='value(status.conditions[0].status)' 2>/dev/null || echo "Unknown")
+            if [ "$READY" = "True" ]; then
+              echo "Service is ready (status: True)"
+              echo "URL: ${{ env.SERVICE_URL }}"
+              exit 0
+            fi
+            echo "Service not ready (status: $READY), waiting 10s..."
+            sleep 10
+          done
+
+          echo "::error::Health check failed after 5 attempts"
+          echo "health_failed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Rollback on health check failure
+        if: steps.health.outputs.health_failed == 'true'
+        run: |
+          echo "::warning::Rolling back to previous revision..."
+          PREVIOUS=$(gcloud run revisions list \
+            --service=${{ env.SERVICE_NAME }} \
+            --region=${{ env.GCP_REGION }} \
+            --project=${{ secrets.GCP_PROJECT_ID }} \
+            --format='value(REVISION)' \
+            --sort-by='~CREATED' \
+            --limit=2 | sed -n '2p')
+
+          if [ -n "$PREVIOUS" ]; then
+            gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
+              --region=${{ env.GCP_REGION }} \
+              --project=${{ secrets.GCP_PROJECT_ID }} \
+              --to-revisions="${PREVIOUS}=100"
+            echo "Rolled back to revision: ${PREVIOUS}"
+          else
+            echo "::error::No previous revision found for rollback"
+          fi
+          exit 1
+
+      - name: Deployment summary
+        if: always()
+        run: |
+          echo "## Staging Deployment Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Field | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Environment** | Staging |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Service** | ${{ env.SERVICE_NAME }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Region** | ${{ env.GCP_REGION }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Project** | ${{ secrets.GCP_PROJECT_ID }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Image** | \`${{ env.IMAGE }}:${{ env.TAG }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **URL** | ${{ env.SERVICE_URL }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Commit** | ${{ github.sha }} |" >> "$GITHUB_STEP_SUMMARY"

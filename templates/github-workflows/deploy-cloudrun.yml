@@ -1,5 +1,9 @@
-# Cloud Run Deployment Template
-# Copy to: .github/workflows/deploy-{environment}.yml
+# Cloud Run Deployment Template (Simple)
+# Copy to: .github/workflows/deploy.yml
+#
+# NOTE: For projects with separate staging/production environments,
+# use deploy-staging.yml + deploy-production.yml instead. Those templates
+# include CI gating, environment protection rules, and confirmation prompts.
 #
 # PREREQUISITES:
 #   1. Set up Workload Identity Federation in GCP (Pulumi shared/workload-identity.ts)
@@ -39,7 +43,11 @@ env:
   HEALTH_CHECK_PATH: '/health'                           # <!-- CUSTOMIZE: health check endpoint -->
 
 jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml  # Run lint + typecheck + tests before deploying
+
   deploy:
+    needs: [ci]
     runs-on: ubuntu-latest
     environment: ${{ github.event.inputs.environment || 'staging' }}
 

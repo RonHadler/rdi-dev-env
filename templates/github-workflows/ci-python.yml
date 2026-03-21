@@ -15,6 +15,7 @@ on:
       - 'docs/**'
       - 'LICENSE'
       - '.gitignore'
+  workflow_call:  # Allow deploy workflows to reuse CI as a gate
 
 permissions:
   contents: read

@@ -11,7 +11,11 @@ cp /path/to/rdi-dev-env/templates/github-workflows/ci.yml .github/workflows/
 cp /path/to/rdi-dev-env/templates/github-workflows/security.yml .github/workflows/
 cp /path/to/rdi-dev-env/templates/github-workflows/gemini-code-review.yml .github/workflows/
 cp /path/to/rdi-dev-env/templates/github-workflows/gemini-on-demand.yml .github/workflows/
-cp /path/to/rdi-dev-env/templates/github-workflows/deploy-cloudrun.yml .github/workflows/
+# For Cloud Run projects (recommended: separate staging + production):
+cp /path/to/rdi-dev-env/templates/github-workflows/deploy-staging.yml .github/workflows/
+cp /path/to/rdi-dev-env/templates/github-workflows/deploy-production.yml .github/workflows/
+# Or use the simple single-workflow approach:
+# cp /path/to/rdi-dev-env/templates/github-workflows/deploy-cloudrun.yml .github/workflows/
 # For Next.js projects, use the Next.js variant instead:
 # cp /path/to/rdi-dev-env/templates/github-workflows/deploy-cloudrun-nextjs.yml .github/workflows/deploy-qa.yml
 # For projects with Firestore:
@@ -139,7 +143,29 @@ Jobs (parallel):        Jobs (gated):
 
 ---
 
-### 5. Cloud Run Deployment (`deploy-cloudrun.yml`)
+### 5. Cloud Run Deployment — Staging + Production (Recommended)
+
+**`deploy-staging.yml`** — Manual trigger (`workflow_dispatch`), CI gate, staging environment.
+
+**`deploy-production.yml`** — Manual trigger with confirmation prompt ("type production"), CI gate, production environment with GitHub protection rules.
+
+Both templates:
+- Gate on CI passing via `workflow_call` (lint + typecheck + tests must pass)
+- Use Workload Identity Federation (no service account keys)
+- Build and push to Artifact Registry
+- Deploy to Cloud Run with health check (5 retries)
+- Auto-rollback to previous revision on health check failure
+- Post deployment summary to GitHub Actions step summary
+
+**Prerequisites:** Same as simple deploy (Dockerfile, WIF, deploy SA, Artifact Registry, GitHub Environments with secrets).
+
+**Customization:** Replace all `<!-- CUSTOMIZE -->` values: `GCP_REGION`, `SERVICE_NAME`, `service-account`.
+
+---
+
+### 5b. Cloud Run Deployment — Simple (`deploy-cloudrun.yml`)
+
+> **Note:** For projects with separate staging/production environments, use `deploy-staging.yml` + `deploy-production.yml` instead.
 
 **Triggers:**
 - Auto: Push to master → deploy to staging
@@ -171,7 +197,7 @@ Deploy to Cloud Run → Health check (5 retries) → Rollback if failed
 
 ---
 
-### 5b. Cloud Run Deployment — Next.js (`deploy-cloudrun-nextjs.yml`)
+### 5c. Cloud Run Deployment — Next.js (`deploy-cloudrun-nextjs.yml`)
 
 Extends the base template with Next.js-specific features:
 - Fetches `NEXT_PUBLIC_*` secrets from GCP Secret Manager at build time
