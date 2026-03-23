@@ -1,13 +1,6 @@
 name: CI Pipeline
 
 on:
-  push:
-    branches: ["<!-- CUSTOMIZE: default_branch -->"]
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - 'LICENSE'
-      - '.gitignore'
   pull_request:
     branches: ["<!-- CUSTOMIZE: default_branch -->"]
     paths-ignore:
@@ -15,13 +8,13 @@ on:
       - 'docs/**'
       - 'LICENSE'
       - '.gitignore'
-  workflow_call:  # Allow deploy workflows to reuse CI as a gate
+  workflow_call:  # Deploy workflows reuse CI as a gate (replaces push trigger)
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:

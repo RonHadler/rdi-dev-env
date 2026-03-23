@@ -106,33 +106,119 @@ jobs:
           flags: >-
             --service-account=<!-- CUSTOMIZE: service-account -->
 
+      - name: Route traffic to new revision
+        run: |
+          gcloud run services update-traffic "${{ env.SERVICE_NAME }}" \
+            --region="${{ env.GCP_REGION }}" \
+            --project="${{ secrets.GCP_PROJECT_ID }}" \
+            --to-latest
+
       - name: Get service URL
         run: |
           echo "Service URL: ${{ steps.deploy.outputs.url }}"
           echo "SERVICE_URL=${{ steps.deploy.outputs.url }}" >> "$GITHUB_ENV"
 
-      - name: Health check
+      - name: Generate ID token for health probe
+        id: id-token
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SERVICE_ACCOUNT }}
+          token_format: 'id_token'
+          id_token_audience: ${{ steps.deploy.outputs.url }}
+          id_token_include_email: true
+
+      - name: Verify deployment
         id: health
         run: |
-          echo "Checking service readiness via gcloud..."
-
+          echo "=== Tier 1: Revision Readiness ==="
+          READY="Unknown"
           for i in 1 2 3 4 5; do
-            echo "Attempt $i/5..."
-            READY=$(gcloud run services describe "$SERVICE_NAME" \
-              --region="$GCP_REGION" \
+            echo "Attempt $i/5: checking latest revision..."
+            LATEST_REVISION=$(gcloud run revisions list \
+              --service="${{ env.SERVICE_NAME }}" \
+              --region="${{ env.GCP_REGION }}" \
+              --project="${{ secrets.GCP_PROJECT_ID }}" \
+              --format='value(REVISION)' \
+              --sort-by='~CREATED' \
+              --limit=1 2>/dev/null || echo "")
+
+            if [ -z "$LATEST_REVISION" ]; then
+              echo "No revision found, waiting 10s..."
+              sleep 10
+              continue
+            fi
+
+            READY=$(gcloud run revisions describe "$LATEST_REVISION" \
+              --region="${{ env.GCP_REGION }}" \
               --project="${{ secrets.GCP_PROJECT_ID }}" \
               --format='json(status.conditions)' 2>/dev/null \
-              | python3 -c "import sys,json; d=json.load(sys.stdin); print(next((c['status'] for c in d.get('status',{}).get('conditions',[]) if c.get('type')=='Ready'),'Unknown'))" 2>/dev/null || echo "Unknown")
+              | python3 -c "import sys,json; d=json.load(sys.stdin); print(next((c['status'] for c in d.get('status',{}).get('conditions',[]) if c.get('type')=='Ready'),'Unknown'))" || echo "Unknown")
+
             if [ "$READY" = "True" ]; then
-              echo "Service is ready (status: True)"
-              echo "URL: ${{ env.SERVICE_URL }}"
-              exit 0
+              echo "Revision $LATEST_REVISION is ready"
+              break
             fi
-            echo "Service not ready (status: $READY), waiting 10s..."
+            echo "Revision not ready (status: $READY), waiting 10s..."
             sleep 10
           done
 
-          echo "::error::Health check failed after 5 attempts"
+          if [ "$READY" != "True" ]; then
+            echo "::error::Tier 1 failed: revision not ready after 5 attempts"
+            echo "health_failed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo ""
+          echo "=== Tier 2: Traffic Routing ==="
+          TRAFFIC=$(gcloud run services describe "${{ env.SERVICE_NAME }}" \
+            --region="${{ env.GCP_REGION }}" \
+            --project="${{ secrets.GCP_PROJECT_ID }}" \
+            --format='json(status.traffic)' 2>/dev/null \
+            | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          traffic = d.get('status', {}).get('traffic', [])
+          for t in traffic:
+            if t.get('revisionName') == '$LATEST_REVISION':
+              print(t.get('percent', 0))
+              sys.exit(0)
+          print(0)
+          " || echo "0")
+
+          if [ "$TRAFFIC" != "100" ]; then
+            echo "::error::Tier 2 failed: latest revision has ${TRAFFIC}% traffic (expected 100%)"
+            echo "health_failed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Latest revision has 100% traffic"
+
+          echo ""
+          echo "=== Tier 3: HTTP Health Probe ==="
+          TOKEN="${{ steps.id-token.outputs.id_token }}"
+
+          if [ -z "$TOKEN" ]; then
+            echo "::warning::Could not generate identity token — skipping HTTP probe"
+            echo "Tier 3 skipped (token generation failed). Tiers 1-2 passed."
+            exit 0
+          fi
+
+          for i in 1 2 3; do
+            echo "Attempt $i/3: probing ${{ env.SERVICE_URL }}${{ env.HEALTH_CHECK_PATH }}..."
+            STATUS=$(curl -s -o /dev/null -w '%{http_code}' \
+              -H "Authorization: Bearer ${TOKEN}" \
+              "${{ env.SERVICE_URL }}${{ env.HEALTH_CHECK_PATH }}" || true)
+            if [ "$STATUS" = "200" ]; then
+              echo "Health probe passed (HTTP 200)"
+              echo ""
+              echo "All 3 verification tiers passed."
+              exit 0
+            fi
+            echo "Got HTTP $STATUS, waiting 10s..."
+            sleep 10
+          done
+
+          echo "::error::Tier 3 failed: HTTP health probe returned $STATUS after 3 attempts"
           echo "health_failed=true" >> "$GITHUB_OUTPUT"
 
       - name: Rollback on health check failure
