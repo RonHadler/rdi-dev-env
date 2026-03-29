@@ -22,15 +22,15 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
       - name: Setup Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v5
 
       - name: Install dependencies
         run: uv sync --frozen
@@ -92,7 +92,7 @@ jobs:
             FOUND=$(echo "$KEYS" | wc -l)
             echo "**CRITICAL: Possible hardcoded API keys found ($FOUND occurrences)**" >> secrets-report.md
             echo '```' >> secrets-report.md
-            echo "$KEYS" | head -10 >> secrets-report.md
+            printf "%s\n" "$KEYS" | awk -F: '{print $1":"$2}' | head -10 >> secrets-report.md
             echo '```' >> secrets-report.md
           else
             echo "No hardcoded secrets detected." >> secrets-report.md
@@ -167,7 +167,7 @@ jobs:
       # ── Post Summary ──
       - name: Post security report
         if: always() && github.event_name == 'pull_request'
-        uses: actions/github-script@v8
+        uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
