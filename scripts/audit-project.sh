@@ -232,7 +232,7 @@ run_check() {
       if [[ "$check_path" == *"*"* ]]; then
         local find_pattern
         find_pattern=$(basename "$check_path")
-        local find_args=("$project_dir" -path "*/.venv" -prune -o -path "*/.git" -prune -o -path "*/node_modules" -prune -o -path "*/target" -prune)
+        local find_args=("$project_dir" -path "*/.venv" -prune -o -path "*/.git" -prune -o -path "*/node_modules" -prune -o -path "*/target" -prune -o -path "*/tests" -prune -o -path "*/testdata" -prune -o -path "*/__tests__" -prune)
 
         # Handle single brace expansion group: *.{py,go,rs} → multiple -name args
         # Only supports one brace group per pattern (no nested or multiple groups)
@@ -287,7 +287,7 @@ run_check() {
       if [[ "$check_path" == *"*"* ]]; then
         local find_pattern
         find_pattern=$(basename "$check_path")
-        local find_args=("$project_dir" -path "*/.venv" -prune -o -path "*/.git" -prune -o -path "*/node_modules" -prune -o -path "*/target" -prune)
+        local find_args=("$project_dir" -path "*/.venv" -prune -o -path "*/.git" -prune -o -path "*/node_modules" -prune -o -path "*/target" -prune -o -path "*/tests" -prune -o -path "*/testdata" -prune -o -path "*/__tests__" -prune)
 
         if [[ "$find_pattern" == *"{"*"}"* ]]; then
           local prefix="${find_pattern%%\{*}"

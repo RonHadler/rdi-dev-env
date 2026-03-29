@@ -69,7 +69,7 @@ json_extract_field() {
     return
   fi
   # Check for null
-  if printf '%s' "$line" | grep -q "null"; then
+  if printf '%s' "$line" | grep -qE "\"$field\"[[:space:]]*:[[:space:]]*null"; then
     echo ""
     return
   fi
@@ -446,7 +446,7 @@ _extract_go_metadata() {
   local dir="$1"
   # go.mod: first line is "module github.com/user/project-name"
   local mod_line
-  mod_line=$(grep -m1 '^module ' "$dir/go.mod" 2>/dev/null || echo "")
+  mod_line=$(grep -m1 '^module ' "$dir/go.mod" 2>/dev/null | tr -d '\r' || echo "")
   if [ -n "$mod_line" ]; then
     local full_module="${mod_line#module }"
     META_PROJECT_NAME=$(basename "$full_module")
@@ -458,8 +458,8 @@ _extract_go_metadata() {
 _extract_rust_metadata() {
   local dir="$1"
   # Simple TOML parsing for name and description
-  META_PROJECT_NAME=$(grep -m1 '^name' "$dir/Cargo.toml" 2>/dev/null | sed 's/.*"\(.*\)".*/\1/' || echo "")
-  META_DESCRIPTION=$(grep -m1 '^description' "$dir/Cargo.toml" 2>/dev/null | sed 's/.*"\(.*\)".*/\1/' || echo "")
+  META_PROJECT_NAME=$(grep -m1 '^name' "$dir/Cargo.toml" 2>/dev/null | tr -d '\r' | sed 's/.*"\(.*\)".*/\1/' || echo "")
+  META_DESCRIPTION=$(grep -m1 '^description' "$dir/Cargo.toml" 2>/dev/null | tr -d '\r' | sed 's/.*"\(.*\)".*/\1/' || echo "")
   META_PACKAGE_NAME=$(echo "$META_PROJECT_NAME" | sed 's/-/_/g')
 }
 
