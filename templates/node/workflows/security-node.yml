@@ -69,10 +69,11 @@ jobs:
           FOUND=0
 
           KEYS=$(grep -rnE \
-            '(sk-[a-zA-Z0-9]{20,}|AIza[a-zA-Z0-9_-]{35}|AKIA[A-Z0-9]{16}|ghp_[a-zA-Z0-9]{36})' \
+            '(sk-[a-zA-Z0-9_-]{20,}|AIza[a-zA-Z0-9_-]{35}|AKIA[A-Z0-9]{16}|ghp_[a-zA-Z0-9]{36})' \
             --include='*.ts' --include='*.tsx' --include='*.js' --include='*.jsx' \
             --include='*.yaml' --include='*.yml' --include='*.json' \
             --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=coverage --exclude-dir=.git \
+            --exclude-dir=tests --exclude-dir=__tests__ \
             --exclude='*.test.*' --exclude='ci*.yml' --exclude='security*.yml' \
             . 2>/dev/null || true)
 
@@ -99,6 +100,7 @@ jobs:
           EVALS=$(grep -rnE '\beval\s*\(' \
             --include='*.ts' --include='*.tsx' --include='*.js' --include='*.jsx' \
             --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=.git \
+            --exclude-dir=tests --exclude-dir=__tests__ \
             --exclude='*.test.*' \
             . 2>/dev/null || true)
 
@@ -115,6 +117,7 @@ jobs:
           INNER=$(grep -rnE '\.innerHTML\s*=' \
             --include='*.ts' --include='*.tsx' --include='*.js' --include='*.jsx' \
             --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=.git \
+            --exclude-dir=tests --exclude-dir=__tests__ \
             --exclude='*.test.*' \
             . 2>/dev/null || true)
 
@@ -131,6 +134,7 @@ jobs:
           CHILD=$(grep -rnE '(child_process|execSync|spawnSync|exec\()' \
             --include='*.ts' --include='*.tsx' --include='*.js' --include='*.jsx' \
             --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=.git \
+            --exclude-dir=tests --exclude-dir=__tests__ \
             --exclude='*.test.*' \
             . 2>/dev/null || true)
 

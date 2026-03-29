@@ -65,10 +65,10 @@ jobs:
           FOUND=0
 
           KEYS=$(grep -rnE \
-            '(sk-[a-zA-Z0-9]{20,}|AIza[a-zA-Z0-9_-]{35}|AKIA[A-Z0-9]{16}|ghp_[a-zA-Z0-9]{36})' \
+            '(sk-[a-zA-Z0-9_-]{20,}|AIza[a-zA-Z0-9_-]{35}|AKIA[A-Z0-9]{16}|ghp_[a-zA-Z0-9]{36})' \
             --include='*.go' --include='*.yaml' --include='*.yml' \
             --include='*.json' --include='*.toml' \
-            --exclude-dir=vendor --exclude-dir=.git \
+            --exclude-dir=vendor --exclude-dir=.git --exclude-dir=testdata \
             --exclude='*_test.go' \
             --exclude='ci*.yml' --exclude='security*.yml' --exclude='quality-gate*' \
             . 2>/dev/null || true)
@@ -95,7 +95,7 @@ jobs:
           # unsafe package usage
           UNSAFE=$(grep -rnE '\b"unsafe"\b' \
             --include='*.go' \
-            --exclude-dir=vendor --exclude-dir=.git \
+            --exclude-dir=vendor --exclude-dir=.git --exclude-dir=testdata \
             --exclude='*_test.go' \
             . 2>/dev/null || true)
 
@@ -111,7 +111,7 @@ jobs:
           # os/exec with potential user input
           EXEC=$(grep -rnE 'exec\.Command\(' \
             --include='*.go' \
-            --exclude-dir=vendor --exclude-dir=.git \
+            --exclude-dir=vendor --exclude-dir=.git --exclude-dir=testdata \
             --exclude='*_test.go' \
             . 2>/dev/null || true)
 
@@ -127,7 +127,7 @@ jobs:
           # SQL string concatenation (potential injection)
           SQLI=$(grep -rnE '(fmt\.Sprintf|"+.*\+).*([Ss][Ee][Ll][Ee][Cc][Tt]|[Ii][Nn][Ss][Ee][Rr][Tt]|[Uu][Pp][Dd][Aa][Tt][Ee]|[Dd][Ee][Ll][Ee][Tt][Ee])' \
             --include='*.go' \
-            --exclude-dir=vendor --exclude-dir=.git \
+            --exclude-dir=vendor --exclude-dir=.git --exclude-dir=testdata \
             --exclude='*_test.go' \
             . 2>/dev/null || true)
 

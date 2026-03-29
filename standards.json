@@ -1,310 +1,599 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "version": "1.0.0",
-  "description": "RDI Python/FastMCP project standards — declarative compliance checks",
-  "updated": "2026-03-17",
-  "target": "python-fastmcp",
-  "checks": [
-    {
-      "id": "SEC-001a",
-      "name": "Dockerfile has USER directive",
-      "severity": "critical",
-      "category": "security",
-      "description": "Dockerfile must switch to a non-root user via USER directive",
-      "type": "file_contains",
-      "path": "Dockerfile",
-      "pattern": "^USER[[:space:]]+[a-zA-Z]",
-      "remediation": "Add: RUN useradd -m appuser && chown -R appuser:appuser /app\\nUSER appuser"
+  "version": "2.0.0",
+  "description": "RDI project standards — multi-stack compliance checks",
+  "updated": "2026-03-29",
+  "stacks": {
+    "base": {
+      "detect": { "always": true },
+      "checks": [
+        {
+          "id": "BASE-SEC-001",
+          "name": "No hardcoded secrets",
+          "severity": "critical",
+          "category": "security",
+          "description": "Source files must not contain hardcoded API keys or tokens",
+          "type": "file_not_contains",
+          "path": "**/*.{py,go,rs,ts,tsx,js,jsx,yaml,yml,json}",
+          "pattern": "(sk-[a-zA-Z0-9_-]{20,}|AIza[a-zA-Z0-9_-]{35}|AKIA[A-Z0-9]{16}|ghp_[a-zA-Z0-9]{36})",
+          "remediation": "Move secrets to .env files or secret manager"
+        },
+        {
+          "id": "BASE-CI-001",
+          "name": "Gemini code review workflow",
+          "severity": "high",
+          "category": "ci",
+          "description": "Project must have automated AI code review on PRs",
+          "type": "file_exists",
+          "path": ".github/workflows/gemini-code-review.yml",
+          "remediation": "Run rdi-refresh to deploy gemini-code-review.yml"
+        },
+        {
+          "id": "BASE-QUAL-001",
+          "name": "Makefile present",
+          "severity": "medium",
+          "category": "quality",
+          "description": "Project must have a Makefile with standard targets",
+          "type": "file_exists",
+          "path": "Makefile",
+          "remediation": "Copy and customize Makefile from rdi-dev-env/templates/"
+        },
+        {
+          "id": "BASE-CON-001",
+          "name": "CLAUDE.md present",
+          "severity": "low",
+          "category": "consistency",
+          "description": "Project should have a CLAUDE.md for Claude Code context",
+          "type": "file_exists",
+          "path": "CLAUDE.md",
+          "remediation": "Run rdi-refresh to seed CLAUDE.md"
+        },
+        {
+          "id": "BASE-CON-002",
+          "name": "AGENTS.md present",
+          "severity": "low",
+          "category": "consistency",
+          "description": "Project should have an AGENTS.md for shared agent context",
+          "type": "file_exists",
+          "path": "AGENTS.md",
+          "remediation": "Run rdi-refresh to seed AGENTS.md"
+        },
+        {
+          "id": "BASE-CON-003",
+          "name": "GEMINI.md present",
+          "severity": "low",
+          "category": "consistency",
+          "description": "Project should have a GEMINI.md for Gemini review standards",
+          "type": "file_exists",
+          "path": "GEMINI.md",
+          "remediation": "Run rdi-refresh to seed GEMINI.md"
+        },
+        {
+          "id": "BASE-CON-004",
+          "name": "Dependabot config",
+          "severity": "low",
+          "category": "consistency",
+          "description": "Project should have dependabot.yml for automated dependency updates",
+          "type": "file_exists",
+          "path": ".github/dependabot.yml",
+          "remediation": "Run rdi-refresh to deploy dependabot.yml"
+        },
+        {
+          "id": "BASE-CON-005",
+          "name": "Stale workflow",
+          "severity": "low",
+          "category": "consistency",
+          "description": "Project should have a stale PR/issue cleanup workflow",
+          "type": "file_exists",
+          "path": ".github/workflows/stale.yml",
+          "remediation": "Run rdi-refresh to deploy stale.yml"
+        },
+        {
+          "id": "BASE-CON-006",
+          "name": "RDI baseline marker",
+          "severity": "low",
+          "category": "consistency",
+          "description": "Project should have .rdi-baseline tracking adoption version",
+          "type": "file_exists",
+          "path": ".rdi-baseline",
+          "remediation": "Create .rdi-baseline with adoption version and any suppressed checks"
+        },
+        {
+          "id": "BASE-CON-007",
+          "name": "CLAUDE.md references tasks.json",
+          "severity": "low",
+          "category": "consistency",
+          "description": "CLAUDE.md should instruct agents to check tasks.json for pending work",
+          "type": "file_contains",
+          "path": "CLAUDE.md",
+          "pattern": "tasks\\.json",
+          "remediation": "Add tasks.json check to Session Startup Checklist in CLAUDE.md"
+        },
+        {
+          "id": "BASE-CON-008",
+          "name": "No uncustomized template markers",
+          "severity": "medium",
+          "category": "consistency",
+          "description": "Project files should not contain leftover <!-- CUSTOMIZE --> markers from templates",
+          "type": "file_not_contains",
+          "path": "**/*.md",
+          "pattern": "<!-- CUSTOMIZE",
+          "remediation": "Replace all <!-- CUSTOMIZE --> markers with project-specific values"
+        }
+      ]
     },
-    {
-      "id": "SEC-001b",
-      "name": "Dockerfile USER is not root",
-      "severity": "critical",
-      "category": "security",
-      "description": "Dockerfile USER directive must not be set to root",
-      "type": "file_not_contains",
-      "path": "Dockerfile",
-      "pattern": "^USER[[:space:]]+root",
-      "remediation": "Change USER root to USER appuser (create user first with useradd)"
+    "python": {
+      "extends": "base",
+      "detect": { "file_exists": "pyproject.toml" },
+      "checks": [
+        {
+          "id": "PY-SEC-001",
+          "name": "Dockerfile has USER directive",
+          "severity": "critical",
+          "category": "security",
+          "description": "Dockerfile must switch to a non-root user via USER directive",
+          "type": "file_contains",
+          "path": "Dockerfile",
+          "pattern": "^USER[[:blank:]]+[a-zA-Z]",
+          "remediation": "Add: RUN useradd -m appuser && chown -R appuser:appuser /app\\nUSER appuser"
+        },
+        {
+          "id": "PY-SEC-002",
+          "name": "Dockerfile USER is not root",
+          "severity": "critical",
+          "category": "security",
+          "description": "Dockerfile USER directive must not be set to root",
+          "type": "file_not_contains",
+          "path": "Dockerfile",
+          "pattern": "^USER[[:blank:]]+root",
+          "remediation": "Change USER root to USER appuser"
+        },
+        {
+          "id": "PY-SEC-003",
+          "name": "Frozen dependency install",
+          "severity": "critical",
+          "category": "security",
+          "description": "Dockerfile uv sync must use --frozen to prevent uncontrolled dep resolution",
+          "type": "file_contains",
+          "path": "Dockerfile",
+          "pattern": "uv sync.*--frozen|uv sync.*--no-dev",
+          "remediation": "Change 'uv sync' to 'uv sync --frozen --no-dev' in Dockerfile"
+        },
+        {
+          "id": "PY-SEC-004",
+          "name": "Docker layer caching",
+          "severity": "high",
+          "category": "security",
+          "description": "Dockerfile should copy dependency files before source for layer caching",
+          "type": "file_contains",
+          "path": "Dockerfile",
+          "pattern": "COPY.*pyproject\\.toml.*uv\\.lock",
+          "remediation": "Add: COPY pyproject.toml uv.lock* /app/ before COPY . /app"
+        },
+        {
+          "id": "PY-CI-001",
+          "name": "Lint workflow",
+          "severity": "high",
+          "category": "ci",
+          "description": "Project must have a lint workflow (ruff check + format)",
+          "type": "file_exists",
+          "path": ".github/workflows/lint-python.yml",
+          "remediation": "Run rdi-refresh to deploy lint-python.yml"
+        },
+        {
+          "id": "PY-CI-002",
+          "name": "Security scan workflow",
+          "severity": "high",
+          "category": "ci",
+          "description": "Project must have a security scanning workflow",
+          "type": "file_exists",
+          "path": ".github/workflows/security-python.yml",
+          "remediation": "Run rdi-refresh to deploy security-python.yml"
+        },
+        {
+          "id": "PY-CI-003",
+          "name": "Test workflow",
+          "severity": "high",
+          "category": "ci",
+          "description": "Project must have a test workflow with coverage gate",
+          "type": "file_exists",
+          "path": ".github/workflows/test-python.yml",
+          "remediation": "Run rdi-refresh to deploy test-python.yml"
+        },
+        {
+          "id": "PY-CI-004",
+          "name": "Type check workflow",
+          "severity": "high",
+          "category": "ci",
+          "description": "Project must have a mypy type check workflow",
+          "type": "file_exists",
+          "path": ".github/workflows/typecheck-python.yml",
+          "remediation": "Run rdi-refresh to deploy typecheck-python.yml"
+        },
+        {
+          "id": "PY-CI-005",
+          "name": "uv from official image",
+          "severity": "high",
+          "category": "ci",
+          "description": "Dockerfile should install uv from the official container image, not pip",
+          "type": "file_contains",
+          "path": "Dockerfile",
+          "pattern": "COPY --from=ghcr\\.io/astral-sh/uv",
+          "remediation": "Replace 'pip install uv' with 'COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/'"
+        },
+        {
+          "id": "PY-QUAL-001",
+          "name": "Build system in pyproject.toml",
+          "severity": "medium",
+          "category": "quality",
+          "description": "pyproject.toml must declare a [build-system] section",
+          "type": "file_contains",
+          "path": "pyproject.toml",
+          "pattern": "^\\[build-system\\]",
+          "remediation": "Add [build-system] with setuptools backend to pyproject.toml"
+        },
+        {
+          "id": "PY-QUAL-002",
+          "name": "uv.lock committed",
+          "severity": "medium",
+          "category": "quality",
+          "description": "uv.lock should be committed for reproducible builds",
+          "type": "file_exists",
+          "path": "uv.lock",
+          "remediation": "Run 'uv lock' and commit the resulting uv.lock file"
+        },
+        {
+          "id": "PY-QUAL-003",
+          "name": "uv.lock not gitignored",
+          "severity": "medium",
+          "category": "quality",
+          "description": "uv.lock must not be in .gitignore (breaks --frozen CI builds)",
+          "type": "file_not_contains",
+          "path": ".gitignore",
+          "pattern": "^/?uv\\.lock",
+          "remediation": "Remove 'uv.lock' from .gitignore"
+        },
+        {
+          "id": "PY-QUAL-004",
+          "name": "mypy in dev dependencies",
+          "severity": "medium",
+          "category": "quality",
+          "description": "mypy must be in dev dependencies for CI typecheck to work",
+          "type": "file_contains",
+          "path": "pyproject.toml",
+          "pattern": "mypy",
+          "remediation": "Add mypy>=1.13 to [dependency-groups] dev in pyproject.toml"
+        },
+        {
+          "id": "PY-QUAL-005",
+          "name": "pytest-cov in dev dependencies",
+          "severity": "medium",
+          "category": "quality",
+          "description": "pytest-cov must be in dev dependencies for CI coverage reporting",
+          "type": "file_contains",
+          "path": "pyproject.toml",
+          "pattern": "pytest-cov",
+          "remediation": "Add pytest-cov>=5.0 to [dependency-groups] dev in pyproject.toml"
+        }
+      ]
     },
-    {
-      "id": "SEC-002",
-      "name": "No hardcoded secrets",
-      "severity": "critical",
-      "category": "security",
-      "description": "Source files must not contain hardcoded API keys or tokens",
-      "type": "file_not_contains",
-      "path": "**/*.py",
-      "pattern": "(sk-[a-zA-Z0-9]{20,}|AIza[a-zA-Z0-9_-]{35}|AKIA[A-Z0-9]{16}|ghp_[a-zA-Z0-9]{36})",
-      "remediation": "Move secrets to .env files or GCP Secret Manager"
+    "python-fastmcp": {
+      "extends": "python",
+      "detect": { "file_contains": { "path": "pyproject.toml", "pattern": "fastmcp" } },
+      "checks": [
+        {
+          "id": "MCP-QUAL-001",
+          "name": "Pydantic Settings",
+          "severity": "medium",
+          "category": "quality",
+          "description": "Project should use pydantic-settings for configuration",
+          "type": "file_contains",
+          "path": "pyproject.toml",
+          "pattern": "pydantic-settings",
+          "remediation": "Add pydantic-settings>=2.0 to project dependencies"
+        },
+        {
+          "id": "MCP-QUAL-002",
+          "name": "Settings getter pattern",
+          "severity": "medium",
+          "category": "quality",
+          "description": "Config module should expose a get_settings() accessor for the singleton",
+          "type": "file_contains",
+          "path": "**/config.py",
+          "pattern": "def get_settings\\(",
+          "remediation": "Add: def get_settings() -> Settings:\\n    return settings"
+        },
+        {
+          "id": "MCP-QUAL-003",
+          "name": "Conftest env reset",
+          "severity": "medium",
+          "category": "quality",
+          "description": "Test conftest.py should reset environment and re-instantiate Settings singleton",
+          "type": "file_contains",
+          "path": "**/conftest.py",
+          "pattern": "config\\.settings\\s*=\\s*Settings\\(",
+          "remediation": "Add autouse fixture that monkeypatches env and re-instantiates config.settings = Settings()"
+        },
+        {
+          "id": "MCP-QUAL-004",
+          "name": "No python-dotenv",
+          "severity": "medium",
+          "category": "quality",
+          "description": "Projects using pydantic-settings should not also use python-dotenv for env loading",
+          "type": "file_not_contains",
+          "path": "**/server.py",
+          "pattern": "dotenv\\.load_dotenv\\(|load_dotenv\\(",
+          "remediation": "Remove load_dotenv() calls — pydantic-settings handles .env loading via model_config"
+        }
+      ]
     },
-    {
-      "id": "SEC-003",
-      "name": "Frozen dependency install",
-      "severity": "critical",
-      "category": "security",
-      "description": "Dockerfile uv sync must use --frozen or --no-dev to prevent uncontrolled dep resolution",
-      "type": "file_contains",
-      "path": "Dockerfile",
-      "pattern": "uv sync.*--frozen|uv sync.*--no-dev",
-      "remediation": "Change 'uv sync' to 'uv sync --frozen --no-dev' in Dockerfile"
+    "go": {
+      "extends": "base",
+      "detect": { "file_exists": "go.mod" },
+      "checks": [
+        {
+          "id": "GO-SEC-001",
+          "name": "Dockerfile has USER directive",
+          "severity": "critical",
+          "category": "security",
+          "description": "Dockerfile must switch to a non-root user via USER directive",
+          "type": "file_contains",
+          "path": "Dockerfile",
+          "pattern": "^USER[[:blank:]]+[a-zA-Z]",
+          "remediation": "Add non-root user to Dockerfile"
+        },
+        {
+          "id": "GO-SEC-002",
+          "name": "Dockerfile USER is not root",
+          "severity": "critical",
+          "category": "security",
+          "description": "Dockerfile USER directive must not be set to root",
+          "type": "file_not_contains",
+          "path": "Dockerfile",
+          "pattern": "^USER[[:blank:]]+root",
+          "remediation": "Change USER root to USER appuser"
+        },
+        {
+          "id": "GO-CI-001",
+          "name": "Lint workflow",
+          "severity": "high",
+          "category": "ci",
+          "description": "Project must have a golangci-lint workflow",
+          "type": "file_exists",
+          "path": ".github/workflows/lint-go.yml",
+          "remediation": "Run rdi-refresh to deploy lint-go.yml"
+        },
+        {
+          "id": "GO-CI-002",
+          "name": "Security scan workflow",
+          "severity": "high",
+          "category": "ci",
+          "description": "Project must have a govulncheck security workflow",
+          "type": "file_exists",
+          "path": ".github/workflows/security-go.yml",
+          "remediation": "Run rdi-refresh to deploy security-go.yml"
+        },
+        {
+          "id": "GO-CI-003",
+          "name": "Test workflow",
+          "severity": "high",
+          "category": "ci",
+          "description": "Project must have a go test workflow with coverage gate",
+          "type": "file_exists",
+          "path": ".github/workflows/test-go.yml",
+          "remediation": "Run rdi-refresh to deploy test-go.yml"
+        },
+        {
+          "id": "GO-CI-004",
+          "name": "Type check workflow",
+          "severity": "high",
+          "category": "ci",
+          "description": "Project must have a go vet type check workflow",
+          "type": "file_exists",
+          "path": ".github/workflows/typecheck-go.yml",
+          "remediation": "Run rdi-refresh to deploy typecheck-go.yml"
+        }
+      ]
     },
-    {
-      "id": "SEC-004",
-      "name": "Docker layer caching",
-      "severity": "high",
-      "category": "security",
-      "description": "Dockerfile should copy dependency files before source for layer caching",
-      "type": "file_contains",
-      "path": "Dockerfile",
-      "pattern": "COPY.*pyproject\\.toml.*uv\\.lock",
-      "remediation": "Add: COPY pyproject.toml uv.lock* /app/ before COPY . /app"
+    "rust": {
+      "extends": "base",
+      "detect": { "file_exists": "Cargo.toml" },
+      "checks": [
+        {
+          "id": "RS-SEC-001",
+          "name": "Dockerfile has USER directive",
+          "severity": "critical",
+          "category": "security",
+          "description": "Dockerfile must switch to a non-root user via USER directive",
+          "type": "file_contains",
+          "path": "Dockerfile",
+          "pattern": "^USER[[:blank:]]+[a-zA-Z]",
+          "remediation": "Add non-root user to Dockerfile"
+        },
+        {
+          "id": "RS-SEC-002",
+          "name": "Dockerfile USER is not root",
+          "severity": "critical",
+          "category": "security",
+          "description": "Dockerfile USER directive must not be set to root",
+          "type": "file_not_contains",
+          "path": "Dockerfile",
+          "pattern": "^USER[[:blank:]]+root",
+          "remediation": "Change USER root to USER appuser"
+        },
+        {
+          "id": "RS-CI-001",
+          "name": "Lint workflow",
+          "severity": "high",
+          "category": "ci",
+          "description": "Project must have a clippy lint workflow",
+          "type": "file_exists",
+          "path": ".github/workflows/lint-rust.yml",
+          "remediation": "Run rdi-refresh to deploy lint-rust.yml"
+        },
+        {
+          "id": "RS-CI-002",
+          "name": "Security scan workflow",
+          "severity": "high",
+          "category": "ci",
+          "description": "Project must have a cargo-audit security workflow",
+          "type": "file_exists",
+          "path": ".github/workflows/security-rust.yml",
+          "remediation": "Run rdi-refresh to deploy security-rust.yml"
+        },
+        {
+          "id": "RS-CI-003",
+          "name": "Test workflow",
+          "severity": "high",
+          "category": "ci",
+          "description": "Project must have a cargo test workflow with coverage gate",
+          "type": "file_exists",
+          "path": ".github/workflows/test-rust.yml",
+          "remediation": "Run rdi-refresh to deploy test-rust.yml"
+        },
+        {
+          "id": "RS-CI-004",
+          "name": "Type check workflow",
+          "severity": "high",
+          "category": "ci",
+          "description": "Project must have a cargo check workflow",
+          "type": "file_exists",
+          "path": ".github/workflows/typecheck-rust.yml",
+          "remediation": "Run rdi-refresh to deploy typecheck-rust.yml"
+        }
+      ]
     },
-    {
-      "id": "CI-001",
-      "name": "CI lint/test workflow",
-      "severity": "high",
-      "category": "ci",
-      "description": "Project must have a CI workflow that runs linting and tests",
-      "type": "file_exists",
-      "path": ".github/workflows/ci.yml",
-      "remediation": "Copy ci-python.yml from rdi-dev-env/templates/github-workflows/"
-    },
-    {
-      "id": "CI-002",
-      "name": "Security scan workflow",
-      "severity": "high",
-      "category": "ci",
-      "description": "Project must have a security scanning workflow",
-      "type": "file_exists",
-      "path": ".github/workflows/security.yml",
-      "remediation": "Copy security-python.yml from rdi-dev-env/templates/github-workflows/"
-    },
-    {
-      "id": "CI-003",
-      "name": "Gemini code review workflow",
-      "severity": "high",
-      "category": "ci",
-      "description": "Project must have automated AI code review on PRs",
-      "type": "file_exists",
-      "path": ".github/workflows/gemini-code-review.yml",
-      "remediation": "Copy gemini-code-review.yml from rdi-dev-env/templates/github-workflows/"
-    },
-    {
-      "id": "CI-004",
-      "name": "uv from official image",
-      "severity": "high",
-      "category": "ci",
-      "description": "Dockerfile should install uv from the official container image, not pip",
-      "type": "file_contains",
-      "path": "Dockerfile",
-      "pattern": "COPY --from=ghcr\\.io/astral-sh/uv",
-      "remediation": "Replace 'pip install uv' with 'COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/'"
-    },
-    {
-      "id": "QUAL-001",
-      "name": "Build system in pyproject.toml",
-      "severity": "medium",
-      "category": "quality",
-      "description": "pyproject.toml must declare a [build-system] section",
-      "type": "file_contains",
-      "path": "pyproject.toml",
-      "pattern": "^\\[build-system\\]",
-      "remediation": "Add [build-system]\\nrequires = [\"setuptools>=61.0\"]\\nbuild-backend = \"setuptools.build_meta\""
-    },
-    {
-      "id": "QUAL-002",
-      "name": "Pydantic Settings",
-      "severity": "medium",
-      "category": "quality",
-      "description": "Project should use pydantic-settings for configuration",
-      "type": "file_contains",
-      "path": "pyproject.toml",
-      "pattern": "pydantic-settings",
-      "remediation": "Add pydantic-settings>=2.0 to project dependencies"
-    },
-    {
-      "id": "QUAL-003",
-      "name": "Settings getter pattern",
-      "severity": "medium",
-      "category": "quality",
-      "description": "Config module should expose a get_settings() accessor for the singleton",
-      "type": "file_contains",
-      "path": "**/config.py",
-      "pattern": "def get_settings\\(",
-      "remediation": "Add: def get_settings() -> Settings:\\n    return settings"
-    },
-    {
-      "id": "QUAL-004",
-      "name": "Conftest env reset",
-      "severity": "medium",
-      "category": "quality",
-      "description": "Test conftest.py should reset environment and re-instantiate Settings singleton",
-      "type": "file_contains",
-      "path": "**/conftest.py",
-      "pattern": "config\\.settings\\s*=\\s*Settings\\(",
-      "remediation": "Add autouse fixture that monkeypatches env and re-instantiates config.settings = Settings()"
-    },
-    {
-      "id": "QUAL-005",
-      "name": "Makefile present",
-      "severity": "medium",
-      "category": "quality",
-      "description": "Project must have a Makefile with standard targets",
-      "type": "file_exists",
-      "path": "Makefile",
-      "remediation": "Copy and customize Makefile from rdi-dev-env/templates/python-fastmcp/"
-    },
-    {
-      "id": "QUAL-006",
-      "name": "No python-dotenv",
-      "severity": "medium",
-      "category": "quality",
-      "description": "Projects using pydantic-settings should not also use python-dotenv for env loading",
-      "type": "file_not_contains",
-      "path": "**/server.py",
-      "pattern": "dotenv\\.load_dotenv\\(|load_dotenv\\(",
-      "remediation": "Remove load_dotenv() calls — pydantic-settings handles .env loading via model_config"
-    },
-    {
-      "id": "QUAL-007",
-      "name": "uv.lock committed",
-      "severity": "medium",
-      "category": "quality",
-      "description": "uv.lock should be committed for reproducible builds",
-      "type": "file_exists",
-      "path": "uv.lock",
-      "remediation": "Run 'uv lock' and commit the resulting uv.lock file"
-    },
-    {
-      "id": "QUAL-008",
-      "name": "uv.lock not gitignored",
-      "severity": "medium",
-      "category": "quality",
-      "description": "uv.lock must not be in .gitignore (breaks --frozen CI builds)",
-      "type": "file_not_contains",
-      "path": ".gitignore",
-      "pattern": "^/?uv\\.lock",
-      "remediation": "Remove 'uv.lock' from .gitignore — it must be committed for reproducible builds"
-    },
-    {
-      "id": "QUAL-009",
-      "name": "mypy in dev dependencies",
-      "severity": "medium",
-      "category": "quality",
-      "description": "mypy must be in dev dependencies for CI typecheck to work",
-      "type": "file_contains",
-      "path": "pyproject.toml",
-      "pattern": "mypy",
-      "remediation": "Add mypy>=1.11 to [dependency-groups] dev in pyproject.toml"
-    },
-    {
-      "id": "QUAL-010",
-      "name": "pytest-cov in dev dependencies",
-      "severity": "medium",
-      "category": "quality",
-      "description": "pytest-cov must be in dev dependencies for CI coverage reporting",
-      "type": "file_contains",
-      "path": "pyproject.toml",
-      "pattern": "pytest-cov",
-      "remediation": "Add pytest-cov>=5.0 to [dependency-groups] dev in pyproject.toml"
-    },
-    {
-      "id": "CON-001",
-      "name": "CLAUDE.md present",
-      "severity": "low",
-      "category": "consistency",
-      "description": "Project should have a CLAUDE.md for Claude Code context",
-      "type": "file_exists",
-      "path": "CLAUDE.md",
-      "remediation": "Copy and customize CLAUDE.md from rdi-dev-env/templates/python-fastmcp/"
-    },
-    {
-      "id": "CON-002",
-      "name": "AGENTS.md present",
-      "severity": "low",
-      "category": "consistency",
-      "description": "Project should have an AGENTS.md for shared agent context",
-      "type": "file_exists",
-      "path": "AGENTS.md",
-      "remediation": "Copy and customize AGENTS.md from rdi-dev-env/templates/"
-    },
-    {
-      "id": "CON-003",
-      "name": "GEMINI.md present",
-      "severity": "low",
-      "category": "consistency",
-      "description": "Project should have a GEMINI.md for Gemini review standards",
-      "type": "file_exists",
-      "path": "GEMINI.md",
-      "remediation": "Copy and customize GEMINI.md from rdi-dev-env/templates/"
-    },
-    {
-      "id": "CON-004",
-      "name": "Dependabot config",
-      "severity": "low",
-      "category": "consistency",
-      "description": "Project should have dependabot.yml for automated dependency updates",
-      "type": "file_exists",
-      "path": ".github/dependabot.yml",
-      "remediation": "Copy dependabot.yml from rdi-dev-env/templates/github-workflows/"
-    },
-    {
-      "id": "CON-005",
-      "name": "Stale workflow",
-      "severity": "low",
-      "category": "consistency",
-      "description": "Project should have a stale PR/issue cleanup workflow",
-      "type": "file_exists",
-      "path": ".github/workflows/stale.yml",
-      "remediation": "Copy stale.yml from rdi-dev-env/templates/github-workflows/"
-    },
-    {
-      "id": "CON-006",
-      "name": "RDI baseline marker",
-      "severity": "low",
-      "category": "consistency",
-      "description": "Project should have .rdi-baseline tracking adoption version",
-      "type": "file_exists",
-      "path": ".rdi-baseline",
-      "remediation": "Create .rdi-baseline with adoption version and any suppressed checks"
-    },
-    {
-      "id": "CON-007",
-      "name": "CLAUDE.md references tasks.json",
-      "severity": "low",
-      "category": "consistency",
-      "description": "CLAUDE.md should instruct agents to check tasks.json for pending work",
-      "type": "file_contains",
-      "path": "CLAUDE.md",
-      "pattern": "tasks\\.json",
-      "remediation": "Add tasks.json check to Session Startup Checklist in CLAUDE.md"
-    },
-    {
-      "id": "CON-008",
-      "name": "No uncustomized template markers",
-      "severity": "medium",
-      "category": "consistency",
-      "description": "Project files should not contain leftover <!-- CUSTOMIZE --> markers from templates",
-      "type": "file_not_contains",
-      "path": "**/*.md",
-      "pattern": "<!-- CUSTOMIZE",
-      "remediation": "Replace all <!-- CUSTOMIZE --> markers with project-specific values"
+    "node": {
+      "extends": "base",
+      "detect": { "file_exists": "package.json" },
+      "checks": [
+        {
+          "id": "NODE-SEC-001",
+          "name": "Dockerfile has USER directive",
+          "severity": "critical",
+          "category": "security",
+          "description": "Dockerfile must switch to a non-root user via USER directive",
+          "type": "file_contains",
+          "path": "Dockerfile",
+          "pattern": "^USER[[:blank:]]+[a-zA-Z]",
+          "remediation": "Add non-root user to Dockerfile (node user exists in alpine)"
+        },
+        {
+          "id": "NODE-SEC-002",
+          "name": "Dockerfile USER is not root",
+          "severity": "critical",
+          "category": "security",
+          "description": "Dockerfile USER directive must not be set to root",
+          "type": "file_not_contains",
+          "path": "Dockerfile",
+          "pattern": "^USER[[:blank:]]+root",
+          "remediation": "Change USER root to USER node"
+        },
+        {
+          "id": "NODE-CI-001",
+          "name": "Lint workflow",
+          "severity": "high",
+          "category": "ci",
+          "description": "Project must have an ESLint workflow",
+          "type": "file_exists",
+          "path": ".github/workflows/lint-node.yml",
+          "remediation": "Run rdi-refresh to deploy lint-node.yml"
+        },
+        {
+          "id": "NODE-CI-002",
+          "name": "Security scan workflow",
+          "severity": "high",
+          "category": "ci",
+          "description": "Project must have an npm audit security workflow",
+          "type": "file_exists",
+          "path": ".github/workflows/security-node.yml",
+          "remediation": "Run rdi-refresh to deploy security-node.yml"
+        },
+        {
+          "id": "NODE-CI-003",
+          "name": "Test workflow",
+          "severity": "high",
+          "category": "ci",
+          "description": "Project must have a vitest workflow with coverage gate",
+          "type": "file_exists",
+          "path": ".github/workflows/test-node.yml",
+          "remediation": "Run rdi-refresh to deploy test-node.yml"
+        },
+        {
+          "id": "NODE-CI-004",
+          "name": "Type check workflow",
+          "severity": "high",
+          "category": "ci",
+          "description": "Project must have a tsc --noEmit type check workflow",
+          "type": "file_exists",
+          "path": ".github/workflows/typecheck-node.yml",
+          "remediation": "Run rdi-refresh to deploy typecheck-node.yml"
+        },
+        {
+          "id": "NODE-QUAL-001",
+          "name": "ESLint config present",
+          "severity": "medium",
+          "category": "quality",
+          "description": "Project must have an eslint.config.js for ESLint 9+",
+          "type": "file_exists",
+          "path": "eslint.config.js",
+          "remediation": "Copy eslint.config.js from rdi-dev-env/templates/node/"
+        },
+        {
+          "id": "NODE-QUAL-002",
+          "name": "TypeScript config present",
+          "severity": "medium",
+          "category": "quality",
+          "description": "Project must have a tsconfig.json with strict mode",
+          "type": "file_exists",
+          "path": "tsconfig.json",
+          "remediation": "Copy tsconfig.json from rdi-dev-env/templates/node/"
+        }
+      ]
     }
-  ],
+  },
+  "compat_aliases": {
+    "SEC-001a": "PY-SEC-001",
+    "SEC-001b": "PY-SEC-002",
+    "SEC-002": "BASE-SEC-001",
+    "SEC-003": "PY-SEC-003",
+    "SEC-004": "PY-SEC-004",
+    "CI-001": "PY-CI-001",
+    "CI-002": "PY-CI-002",
+    "CI-003": "BASE-CI-001",
+    "CI-004": "PY-CI-005",
+    "QUAL-001": "PY-QUAL-001",
+    "QUAL-002": "MCP-QUAL-001",
+    "QUAL-003": "MCP-QUAL-002",
+    "QUAL-004": "MCP-QUAL-003",
+    "QUAL-005": "BASE-QUAL-001",
+    "QUAL-006": "MCP-QUAL-004",
+    "QUAL-007": "PY-QUAL-002",
+    "QUAL-008": "PY-QUAL-003",
+    "QUAL-009": "PY-QUAL-004",
+    "QUAL-010": "PY-QUAL-005",
+    "CON-001": "BASE-CON-001",
+    "CON-002": "BASE-CON-002",
+    "CON-003": "BASE-CON-003",
+    "CON-004": "BASE-CON-004",
+    "CON-005": "BASE-CON-005",
+    "CON-006": "BASE-CON-006",
+    "CON-007": "BASE-CON-007",
+    "CON-008": "BASE-CON-008"
+  },
   "baseline_spec": {
     "description": ".rdi-baseline JSON marker file schema",
     "fields": {
-      "version": "standards.json version this project adopted (e.g. 1.0.0)",
+      "version": "standards.json version this project adopted (e.g. 2.0.0)",
       "adopted": "ISO date of initial adoption",
-      "suppress": "Array of check IDs to suppress with reason strings",
+      "suppress": "Array of check IDs to suppress with reason strings (supports both old and new IDs)",
       "notes": "Free-form string for project-specific context"
     },
     "example": {
-      "version": "1.0.0",
-      "adopted": "2026-03-16",
+      "version": "2.0.0",
+      "adopted": "2026-03-29",
       "suppress": [
-        { "id": "QUAL-006", "reason": "Alembic env.py needs load_dotenv for standalone execution" }
+        { "id": "MCP-QUAL-004", "reason": "Alembic env.py needs load_dotenv for standalone execution" }
       ],
       "notes": ""
     }

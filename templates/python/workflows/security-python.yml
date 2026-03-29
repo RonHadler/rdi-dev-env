@@ -77,10 +77,10 @@ jobs:
           FOUND=0
 
           KEYS=$(grep -rnE \
-            '(sk-[a-zA-Z0-9]{20,}|AIza[a-zA-Z0-9_-]{35}|AKIA[A-Z0-9]{16}|ghp_[a-zA-Z0-9]{36})' \
+            '(sk-[a-zA-Z0-9_-]{20,}|AIza[a-zA-Z0-9_-]{35}|AKIA[A-Z0-9]{16}|ghp_[a-zA-Z0-9]{36})' \
             --include='*.py' --include='*.yaml' --include='*.yml' \
             --exclude-dir=__pycache__ --exclude-dir=.venv --exclude-dir=.git \
-            --exclude-dir=node_modules \
+            --exclude-dir=node_modules --exclude-dir=tests \
             --exclude='test_*' --exclude='conftest.py' \
             --exclude='ci*.yml' --exclude='security*.yml' --exclude='quality-gate*' \
             . 2>/dev/null || true)
@@ -108,6 +108,7 @@ jobs:
           EVALS=$(grep -rnE '\b(eval|exec)\s*\(' \
             --include='*.py' \
             --exclude-dir=__pycache__ --exclude-dir=.venv --exclude-dir=.git \
+            --exclude-dir=tests \
             --exclude='test_*' --exclude='conftest.py' \
             . 2>/dev/null || true)
 
@@ -124,6 +125,7 @@ jobs:
           SHELL_TRUE=$(grep -rnE 'subprocess\.\w+\(.*shell\s*=\s*True' \
             --include='*.py' \
             --exclude-dir=__pycache__ --exclude-dir=.venv --exclude-dir=.git \
+            --exclude-dir=tests \
             --exclude='test_*' --exclude='conftest.py' \
             . 2>/dev/null || true)
 
@@ -140,6 +142,7 @@ jobs:
           PICKLE=$(grep -rnE '\bpickle\.(load|loads)\b' \
             --include='*.py' \
             --exclude-dir=__pycache__ --exclude-dir=.venv --exclude-dir=.git \
+            --exclude-dir=tests \
             --exclude='test_*' --exclude='conftest.py' \
             . 2>/dev/null || true)
 

@@ -2,7 +2,8 @@
 #
 # rdi-audit — RDI Standards Compliance Auditor
 #
-# Reads standards.json and checks any Python/FastMCP project for compliance.
+# Reads standards.json and checks any project for compliance.
+# Supports Python, Go, Rust, Node, and base-only projects via auto-detection.
 #
 # Usage:
 #   rdi-audit status                  # Dashboard of all known RDI projects
@@ -27,26 +28,22 @@ DIM='\033[2m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-# ── Locate standards.json ───────────────────────────────────
+# ── Locate standards.json and template-utils ────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEV_ENV_DIR="$(dirname "$SCRIPT_DIR")"
 STANDARDS_FILE="$DEV_ENV_DIR/standards.json"
+# shellcheck disable=SC2034  # Used by sourced template-utils.sh
+TEMPLATES_DIR="$DEV_ENV_DIR/templates"
 
 if [ ! -f "$STANDARDS_FILE" ]; then
   echo -e "${RED}Error:${NC} standards.json not found at $STANDARDS_FILE" >&2
   exit 1
 fi
 
-# ── Dependencies check ──────────────────────────────────────
-# We need jq or node for JSON parsing
-if command -v jq &>/dev/null; then
-  JSON_TOOL="jq"
-elif command -v node &>/dev/null; then
-  JSON_TOOL="node"
-else
-  echo -e "${RED}Error:${NC} Either jq or node is required" >&2
-  exit 1
-fi
+# Source shared template utilities
+source "$SCRIPT_DIR/lib/template-utils.sh"
+
+# Python is required (validated by template-utils.sh at source time)
 
 # ── JSON helpers ─────────────────────────────────────────────
 # Pre-parsed check arrays (populated by load_standards)
@@ -60,50 +57,99 @@ declare -a STD_TYPES=()
 declare -a STD_PATHS=()
 declare -a STD_PATTERNS=()
 declare -a STD_REMEDIATIONS=()
+declare -a STD_STACKS=()
 
-# Parse standards.json once into bash arrays (single jq/node invocation)
-# NOTE: Records are newline-delimited. standards.json must use \\n (literal)
-# not actual newlines in field values. If multi-line fields are ever needed,
-# switch to null-byte record delimiters with read -r -d ''.
+# Compat aliases: old v1 check ID → new v2 check ID
+declare -a COMPAT_OLD_IDS=()
+declare -a COMPAT_NEW_IDS=()
+
+# Parse standards.json v2 into bash arrays.
+# Loads ALL checks from ALL stacks (filtering happens at audit time).
 load_standards() {
-  local raw delim=$'\x1f'  # ASCII Unit Separator — won't appear in check data
-  if [ "$JSON_TOOL" = "jq" ]; then
-    STD_VERSION=$(jq -r '.version' "$STANDARDS_FILE")
-    raw=$(jq -r --arg d "$delim" '.checks[] | [.id, .name, .severity, .category, .type, .path, (.pattern // ""), (.remediation // "")] | join($d)' "$STANDARDS_FILE")
-  else
-    raw=$(node -e "
-      const fs = require('fs'), path = require('path');
-      const d = JSON.parse(fs.readFileSync(path.resolve(process.argv[1]), 'utf8'));
-      const sep = '\x1f';
-      process.stdout.write('VERSION' + sep + d.version + '\n');
-      d.checks.forEach(c => {
-        const fields = [c.id, c.name, c.severity, c.category, c.type, c.path, c.pattern || '', c.remediation || ''];
-        process.stdout.write(fields.join(sep) + '\n');
-      });
-    " -- "$STANDARDS_FILE")
-    # Extract version from first line if using node
-    STD_VERSION=$(echo "$raw" | head -1 | cut -d "$delim" -f2)
-    raw=$(echo "$raw" | tail -n +2)
+  local delim=$'\x1f'
+  local raw
+
+  raw=$($PYTHON_CMD -c "
+import json, sys
+sep = chr(31)
+with open(sys.argv[1]) as f:
+    d = json.load(f)
+print('VERSION' + sep + d['version'])
+if 'stacks' in d:
+    for stack_name, stack in d['stacks'].items():
+        for c in stack.get('checks', []):
+            fields = [c['id'], c['name'], c['severity'], c['category'], c['type'], c['path'], c.get('pattern', ''), c.get('remediation', ''), stack_name]
+            print(sep.join(fields))
+    for old_id, new_id in d.get('compat_aliases', {}).items():
+        print('ALIAS' + sep + old_id + sep + new_id)
+elif 'checks' in d:
+    for c in d['checks']:
+        fields = [c['id'], c['name'], c['severity'], c['category'], c['type'], c['path'], c.get('pattern', ''), c.get('remediation', ''), 'all']
+        print(sep.join(fields))
+" "$STANDARDS_FILE") || { echo -e "${RED}Error:${NC} Failed to parse standards.json" >&2; exit 1; }
+
+  # Strip Windows carriage returns
+  raw=$(printf '%s' "$raw" | tr -d '\r')
+
+  STD_VERSION=$(printf '%s\n' "$raw" | head -1 | cut -d "$delim" -f2)
+  STD_COUNT=0
+
+  while IFS="$delim" read -r first rest; do
+    case "$first" in
+      VERSION) continue ;;
+      ALIAS)
+        local old_id new_id
+        old_id=$(printf '%s' "$rest" | cut -d "$delim" -f1)
+        new_id=$(printf '%s' "$rest" | cut -d "$delim" -f2)
+        COMPAT_OLD_IDS+=("$old_id")
+        COMPAT_NEW_IDS+=("$new_id")
+        ;;
+      *)
+        # Regular check line: id, name, severity, category, type, path, pattern, remediation, stack
+        local id="$first"
+        local name severity category type ckpath pattern remediation stack_name
+        IFS="$delim" read -r name severity category type ckpath pattern remediation stack_name <<< "$rest"
+        STD_IDS+=("$id")
+        STD_NAMES+=("$name")
+        STD_SEVERITIES+=("$severity")
+        STD_CATEGORIES+=("$category")
+        STD_TYPES+=("$type")
+        STD_PATHS+=("$ckpath")
+        STD_PATTERNS+=("$pattern")
+        STD_REMEDIATIONS+=("$remediation")
+        STD_STACKS+=("$stack_name")
+        ((STD_COUNT++)) || true
+        ;;
+    esac
+  done <<< "$raw"
+}
+
+# Check if a given check index applies to the detected stack chain.
+# Usage: check_applies_to_chain <index> <space-separated-chain>
+check_applies_to_chain() {
+  local index="$1"
+  local chain="$2"
+  local check_stack="${STD_STACKS[$index]}"
+
+  # v1 compat: "all" matches everything
+  if [ "$check_stack" = "all" ]; then
+    return 0
   fi
 
-  STD_COUNT=0
-  while IFS="$delim" read -r id name severity category type ckpath pattern remediation; do
-    STD_IDS+=("$id")
-    STD_NAMES+=("$name")
-    STD_SEVERITIES+=("$severity")
-    STD_CATEGORIES+=("$category")
-    STD_TYPES+=("$type")
-    STD_PATHS+=("$ckpath")
-    STD_PATTERNS+=("$pattern")
-    STD_REMEDIATIONS+=("$remediation")
-    ((STD_COUNT++)) || true
-  done <<< "$raw"
+  # Check if the check's stack is in the resolved chain
+  for s in $chain; do
+    if [ "$s" = "$check_stack" ]; then
+      return 0
+    fi
+  done
+  return 1
 }
 
 # Load once at startup
 load_standards
 
-# ── Known RDI Python projects ───────────────────────────────
+# ── Known RDI projects ──────────────────────────────────────
+# Stack is auto-detected at audit time from manifest files.
 RDI_PROJECTS=(
   "rdi-datagov-mcp"
   "rdi-google-ads-mcp"
@@ -113,9 +159,11 @@ RDI_PROJECTS=(
   "rdi-poe-mcp"
   "rdi-domo-mcp"
   "rdi-domo-api-reference-mcp"
+  "rdi-argus-mcp"
 )
 
 # ── Check if a check ID is suppressed in .rdi-baseline ──────
+# Supports both new v2 IDs and old v1 IDs via compat_aliases.
 is_suppressed() {
   local project_dir="$1"
   local check_id="$2"
@@ -125,19 +173,30 @@ is_suppressed() {
     return 1  # Not suppressed (no baseline file)
   fi
 
-  if [ "$JSON_TOOL" = "jq" ]; then
-    local found
-    found=$(jq -r --arg id "$check_id" '.suppress[]? | select(.id == $id) | .id' "$baseline_file" 2>/dev/null)
-    [ -n "$found" ]
-  else
-    node -e "
-      const fs = require('fs'), path = require('path');
-      const fp = path.resolve(process.argv[1]);
-      const d = JSON.parse(fs.readFileSync(fp, 'utf8'));
-      const found = (d.suppress || []).some(s => s.id === process.argv[2]);
-      process.exit(found ? 0 : 1);
-    " -- "$baseline_file" "$check_id" 2>/dev/null
-  fi
+  # Build list of IDs to check: the new ID plus any old aliases that map to it
+  local ids_to_check="$check_id"
+  local compat_len=${#COMPAT_NEW_IDS[@]}
+  for ((i=0; i<compat_len; i++)); do
+    if [ "${COMPAT_NEW_IDS[$i]}" = "$check_id" ]; then
+      ids_to_check="$ids_to_check ${COMPAT_OLD_IDS[$i]}"
+    fi
+  done
+
+  # Also check if the check_id itself is an old alias
+  for ((i=0; i<compat_len; i++)); do
+    if [ "${COMPAT_OLD_IDS[$i]}" = "$check_id" ]; then
+      ids_to_check="$ids_to_check ${COMPAT_NEW_IDS[$i]}"
+    fi
+  done
+
+  $PYTHON_CMD -c "
+import json, sys
+with open(sys.argv[1]) as f:
+    d = json.load(f)
+ids = sys.argv[2].split()
+found = any(s.get('id') in ids for s in (d.get('suppress') or []))
+sys.exit(0 if found else 1)
+" "$baseline_file" "$ids_to_check" 2>/dev/null
 }
 
 # ── Run a single check against a project ────────────────────
@@ -168,17 +227,35 @@ run_check() {
 
     file_contains)
       # Handle glob patterns in path
-      # NOTE: glob matching uses basename only (e.g. **/*.py matches all *.py).
-      # Directory-scoped globs like src/**/*.py are NOT enforced — all matching
-      # filenames are checked regardless of directory. This is acceptable because
-      # all current standards.json patterns use **/ root globs.
+      # Supports: **/*.py, **/*.{py,go,rs}, **/config.py
       local target_files=()
       if [[ "$check_path" == *"*"* ]]; then
-        local find_name
-        find_name=$(basename "$check_path")
+        local find_pattern
+        find_pattern=$(basename "$check_path")
+        local find_args=("$project_dir" -path "*/.venv" -prune -o -path "*/.git" -prune -o -path "*/node_modules" -prune -o -path "*/target" -prune -o -path "*/tests" -prune -o -path "*/testdata" -prune -o -path "*/__tests__" -prune)
+
+        # Handle single brace expansion group: *.{py,go,rs} → multiple -name args
+        # Only supports one brace group per pattern (no nested or multiple groups)
+        if [[ "$find_pattern" == *"{"*"}"* ]]; then
+          local prefix="${find_pattern%%\{*}"
+          local remainder="${find_pattern#*\{}"
+          local exts="${remainder%%\}*}"
+          local suffix="${remainder#*\}}"
+          local first=true
+          find_args+=(-o \()
+          IFS=',' read -ra ext_arr <<< "$exts"
+          for ext in "${ext_arr[@]}"; do
+            if $first; then first=false; else find_args+=(-o); fi
+            find_args+=(-name "${prefix}${ext}${suffix}")
+          done
+          find_args+=(\) -print0)
+        else
+          find_args+=(-o -name "$find_pattern" -print0)
+        fi
+
         while IFS= read -r -d '' f; do
           target_files+=("$f")
-        done < <(find "$project_dir" -path "*/.venv" -prune -o -path "*/.git" -prune -o -path "*/node_modules" -prune -o -name "$find_name" -print0 2>/dev/null)
+        done < <(find "${find_args[@]}" 2>/dev/null)
       else
         if [ -f "$project_dir/$check_path" ]; then
           target_files=("$project_dir/$check_path")
@@ -208,11 +285,30 @@ run_check() {
     file_not_contains)
       local target_files=()
       if [[ "$check_path" == *"*"* ]]; then
-        local find_name
-        find_name=$(basename "$check_path")
+        local find_pattern
+        find_pattern=$(basename "$check_path")
+        local find_args=("$project_dir" -path "*/.venv" -prune -o -path "*/.git" -prune -o -path "*/node_modules" -prune -o -path "*/target" -prune -o -path "*/tests" -prune -o -path "*/testdata" -prune -o -path "*/__tests__" -prune)
+
+        if [[ "$find_pattern" == *"{"*"}"* ]]; then
+          local prefix="${find_pattern%%\{*}"
+          local remainder="${find_pattern#*\{}"
+          local exts="${remainder%%\}*}"
+          local suffix="${remainder#*\}}"
+          local first=true
+          find_args+=(-o \()
+          IFS=',' read -ra ext_arr <<< "$exts"
+          for ext in "${ext_arr[@]}"; do
+            if $first; then first=false; else find_args+=(-o); fi
+            find_args+=(-name "${prefix}${ext}${suffix}")
+          done
+          find_args+=(\) -print0)
+        else
+          find_args+=(-o -name "$find_pattern" -print0)
+        fi
+
         while IFS= read -r -d '' f; do
           target_files+=("$f")
-        done < <(find "$project_dir" -path "*/.venv" -prune -o -path "*/.git" -prune -o -path "*/node_modules" -prune -o -name "$find_name" -print0 2>/dev/null)
+        done < <(find "${find_args[@]}" 2>/dev/null)
       else
         if [ -f "$project_dir/$check_path" ]; then
           target_files=("$project_dir/$check_path")
@@ -340,10 +436,20 @@ audit_project() {
     return 1
   fi
 
-  # Check if it looks like a Python project
-  if [ ! -f "$project_dir/pyproject.toml" ] && [ ! -f "$project_dir/setup.py" ] && [ ! -f "$project_dir/requirements.txt" ]; then
-    echo -e "${YELLOW}Warning:${NC} $project_name does not appear to be a Python project" >&2
+  # Auto-detect project stack
+  detect_stack "$project_dir"
+  local detected="$DETECTED_STACK"
+  if [ -z "$detected" ]; then
+    echo -e "${YELLOW}Warning:${NC} Could not detect stack for $project_name (no pyproject.toml, go.mod, Cargo.toml, or package.json)" >&2
+    detected="base"
   fi
+
+  # Resolve template chain for detected stack
+  if ! resolve_chain "$detected"; then
+    echo -e "${RED}Error:${NC} Failed to resolve template chain for '$detected'" >&2
+    return 1
+  fi
+  local chain_str="${TEMPLATE_CHAIN[*]}"
 
   local check_count=$STD_COUNT
 
@@ -362,6 +468,11 @@ audit_project() {
   declare -a result_remediations=()
 
   for ((i=0; i<check_count; i++)); do
+    # Skip checks that don't apply to this project's stack
+    if ! check_applies_to_chain "$i" "$chain_str"; then
+      continue
+    fi
+
     local result
     result=$(run_check "$project_dir" "$i")
 
@@ -466,8 +577,8 @@ EOF
         esac
 
         local commit_type="fix"
-        if [[ "${result_ids[$i]}" == CI-* ]]; then commit_type="ci"; fi
-        if [[ "${result_ids[$i]}" == CON-* ]]; then commit_type="docs"; fi
+        if [[ "${result_ids[$i]}" == *-CI-* ]] || [[ "${result_ids[$i]}" == CI-* ]]; then commit_type="ci"; fi
+        if [[ "${result_ids[$i]}" == *-CON-* ]] || [[ "${result_ids[$i]}" == CON-* ]]; then commit_type="docs"; fi
 
         # Escape remediation for JSON
         local safe_remediation
@@ -479,7 +590,7 @@ EOF
     done
 
     tasks_json+="]}"
-    echo "$tasks_json" | python3 -m json.tool 2>/dev/null || echo "$tasks_json"
+    echo "$tasks_json" | $PYTHON_CMD -m json.tool 2>/dev/null || echo "$tasks_json"
     return 0
   fi
 
@@ -602,16 +713,13 @@ show_dashboard() {
     fi
 
     local score pass fail skip critical_fails upstream status_icon
-    if [ "$JSON_TOOL" = "jq" ]; then
-      read -r score pass fail skip critical_fails upstream <<< "$(echo "$json_result" | jq -r '[.score, .pass, .fail, .skip, .critical_failures, .upstream_candidates] | @tsv')"
-    else
-      local parsed
-      parsed=$(node -e "
-        const d = JSON.parse(process.argv[1]);
-        console.log([d.score, d.pass, d.fail, d.skip, d.critical_failures, d.upstream_candidates].join(' '));
-      " -- "$json_result")
-      read -r score pass fail skip critical_fails upstream <<< "$parsed"
-    fi
+    local parsed
+    parsed=$($PYTHON_CMD -c "
+import json, sys
+d = json.loads(sys.argv[1])
+print(d.get('score',0), d.get('pass',0), d.get('fail',0), d.get('skip',0), d.get('critical_failures',0), d.get('upstream_candidates',0))
+" "$json_result" 2>/dev/null) || parsed="0 0 0 0 0 0"
+    read -r score pass fail skip critical_fails upstream <<< "$parsed"
 
     # Guard against empty/non-integer values from failed parsing
     score=${score:-0}; pass=${pass:-0}; fail=${fail:-0}
@@ -669,7 +777,8 @@ ${BOLD}Exit codes:${NC}
   2  Critical-severity failures
 
 ${BOLD}Standards:${NC}
-  $STD_COUNT checks across 4 severity levels (critical, high, medium, low)
+  $STD_COUNT checks across 6 stacks (base, python, python-fastmcp, go, rust, node)
+  Auto-detects project stack from manifest files
   Version: $STD_VERSION
 EOF
 }
