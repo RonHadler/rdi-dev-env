@@ -193,7 +193,7 @@ import json, sys
 with open(sys.argv[1]) as f:
     d = json.load(f)
 ids = sys.argv[2].split()
-found = any(s['id'] in ids for s in d.get('suppress', []))
+found = any(s.get('id') in ids for s in (d.get('suppress') or []))
 sys.exit(0 if found else 1)
 " "$baseline_file" "$ids_to_check" 2>/dev/null
 }

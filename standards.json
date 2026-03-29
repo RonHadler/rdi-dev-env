@@ -134,7 +134,7 @@
           "description": "Dockerfile must switch to a non-root user via USER directive",
           "type": "file_contains",
           "path": "Dockerfile",
-          "pattern": "^USER[ \\t]+[a-zA-Z]",
+          "pattern": "^USER[[:blank:]]+[a-zA-Z]",
           "remediation": "Add: RUN useradd -m appuser && chown -R appuser:appuser /app\\nUSER appuser"
         },
         {
@@ -145,7 +145,7 @@
           "description": "Dockerfile USER directive must not be set to root",
           "type": "file_not_contains",
           "path": "Dockerfile",
-          "pattern": "^USER[ \\t]+root",
+          "pattern": "^USER[[:blank:]]+root",
           "remediation": "Change USER root to USER appuser"
         },
         {
@@ -339,7 +339,7 @@
           "description": "Dockerfile must switch to a non-root user via USER directive",
           "type": "file_contains",
           "path": "Dockerfile",
-          "pattern": "^USER[ \\t]+[a-zA-Z]",
+          "pattern": "^USER[[:blank:]]+[a-zA-Z]",
           "remediation": "Add non-root user to Dockerfile"
         },
         {
@@ -350,7 +350,7 @@
           "description": "Dockerfile USER directive must not be set to root",
           "type": "file_not_contains",
           "path": "Dockerfile",
-          "pattern": "^USER[ \\t]+root",
+          "pattern": "^USER[[:blank:]]+root",
           "remediation": "Change USER root to USER appuser"
         },
         {
@@ -407,7 +407,7 @@
           "description": "Dockerfile must switch to a non-root user via USER directive",
           "type": "file_contains",
           "path": "Dockerfile",
-          "pattern": "^USER[ \\t]+[a-zA-Z]",
+          "pattern": "^USER[[:blank:]]+[a-zA-Z]",
           "remediation": "Add non-root user to Dockerfile"
         },
         {
@@ -418,7 +418,7 @@
           "description": "Dockerfile USER directive must not be set to root",
           "type": "file_not_contains",
           "path": "Dockerfile",
-          "pattern": "^USER[ \\t]+root",
+          "pattern": "^USER[[:blank:]]+root",
           "remediation": "Change USER root to USER appuser"
         },
         {
@@ -475,7 +475,7 @@
           "description": "Dockerfile must switch to a non-root user via USER directive",
           "type": "file_contains",
           "path": "Dockerfile",
-          "pattern": "^USER[ \\t]+[a-zA-Z]",
+          "pattern": "^USER[[:blank:]]+[a-zA-Z]",
           "remediation": "Add non-root user to Dockerfile (node user exists in alpine)"
         },
         {
@@ -486,7 +486,7 @@
           "description": "Dockerfile USER directive must not be set to root",
           "type": "file_not_contains",
           "path": "Dockerfile",
-          "pattern": "^USER[ \\t]+root",
+          "pattern": "^USER[[:blank:]]+root",
           "remediation": "Change USER root to USER node"
         },
         {

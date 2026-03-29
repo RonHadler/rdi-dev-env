@@ -173,6 +173,9 @@ detect_stack() {
 
   # Sort by layer descending (most specific first)
   local sorted
+  # No templates found — nothing to detect
+  [ ${#stack_entries[@]} -eq 0 ] && return 0
+
   sorted=$(printf '%s\n' "${stack_entries[@]}" | sort -t$'\t' -k1 -rn)
 
   # Evaluate each detect rule
@@ -418,6 +421,10 @@ print(pkg)
 
 _extract_node_metadata() {
   local dir="$1"
+  if ! command -v node &>/dev/null; then
+    echo "Warning: node not found — cannot extract package.json metadata" >&2
+    return 0
+  fi
   local result
   result=$(node -e "
 const fs = require('fs');
