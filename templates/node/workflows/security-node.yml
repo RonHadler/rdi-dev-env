@@ -24,6 +24,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
       # ── Tier 1: Dependency Vulnerabilities ──
       - name: Dependency audit
         id: deps
@@ -35,7 +40,7 @@ jobs:
           AUDIT_OUTPUT=$(npm audit --json 2>/dev/null || true)
 
           if [ -n "$AUDIT_OUTPUT" ]; then
-            HIGH=$(echo "$AUDIT_OUTPUT" | node -e "
+            HIGH=$(printf "%s" "$AUDIT_OUTPUT" | node -e "
               const data = require('fs').readFileSync('/dev/stdin', 'utf8');
               try {
                 const j = JSON.parse(data);

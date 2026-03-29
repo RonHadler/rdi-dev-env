@@ -48,8 +48,8 @@ jobs:
           HIGH=0
           TOTAL=0
 
-          if [ -n "$AUDIT_OUTPUT" ] && echo "$AUDIT_OUTPUT" | python3 -c "import sys,json; json.load(sys.stdin)" 2>/dev/null; then
-            TOTAL=$(echo "$AUDIT_OUTPUT" | python3 -c "
+          if [ -n "$AUDIT_OUTPUT" ] && printf "%s" "$AUDIT_OUTPUT" | python3 -c "import sys,json; json.load(sys.stdin)" 2>/dev/null; then
+            TOTAL=$(printf "%s" "$AUDIT_OUTPUT" | python3 -c "
           import sys, json
           data = json.load(sys.stdin)
           deps = data.get('dependencies', [])
