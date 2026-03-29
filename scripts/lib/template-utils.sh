@@ -29,6 +29,11 @@ elif command -v python &>/dev/null && python --version &>/dev/null; then
   PYTHON_CMD="python"
 fi
 
+if [ -z "$PYTHON_CMD" ]; then
+  echo "Error: Python is required but not found (tried python3 and python)." >&2
+  exit 1
+fi
+
 # ── Globals set by functions ─────────────────────────────────
 TEMPLATE_CHAIN=()       # Set by resolve_chain()
 DETECTED_STACK=""       # Set by detect_stack()
@@ -45,8 +50,9 @@ META_DEFAULT_BRANCH=""
 
 # ── JSON Parsing ─────────────────────────────────────────────
 
-# Extract a simple top-level string field from a JSON file.
-# Only works for flat "key": "value" pairs (not nested objects or arrays).
+# Extract a simple top-level field from a JSON file.
+# Handles both quoted strings ("key": "value") and bare numbers ("key": 2).
+# Does NOT work for nested objects or arrays.
 # Usage: json_extract_field <file> <field_name>
 json_extract_field() {
   local file="$1" field="$2"
@@ -54,7 +60,6 @@ json_extract_field() {
     echo ""
     return
   fi
-  # Match "field": "value" or "field": null
   local line
   line=$(grep -m1 "\"$field\"[[:space:]]*:" "$file" 2>/dev/null || echo "")
   if [ -z "$line" ]; then
@@ -62,12 +67,17 @@ json_extract_field() {
     return
   fi
   # Check for null
-  if echo "$line" | grep -q "null"; then
+  if printf '%s' "$line" | grep -q "null"; then
     echo ""
     return
   fi
-  # Extract quoted value
-  echo "$line" | sed 's/.*"'"$field"'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/'
+  # Try quoted value first: "field": "value"
+  if printf '%s' "$line" | grep -q "\"$field\"[[:space:]]*:[[:space:]]*\""; then
+    printf '%s' "$line" | sed 's/.*"'"$field"'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/'
+  else
+    # Bare numeric value: "field": 2
+    printf '%s' "$line" | sed 's/.*"'"$field"'"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/'
+  fi
 }
 
 # Extract a JSON array of strings from a JSON file using python3.
@@ -325,6 +335,9 @@ assemble_file() {
 # ── .gitignore Concatenation ─────────────────────────────────
 
 # Concatenate .gitignore files from each layer in the template chain.
+# WARNING: This truncates the target .gitignore and rebuilds it from templates.
+# Only use during new project scaffolding, NOT during refresh (which should
+# preserve project-specific exclusions).
 # Usage: copy_gitignore <target_dir>
 # Requires TEMPLATE_CHAIN to be set.
 copy_gitignore() {

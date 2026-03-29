@@ -252,14 +252,15 @@ run_check() {
         # Handle brace expansion: *.{py,go,rs} → multiple -name args
         if [[ "$find_pattern" == *"{"*"}"* ]]; then
           local prefix="${find_pattern%%\{*}"
-          local exts="${find_pattern#*\{}"
-          exts="${exts%%\}*}"
+          local remainder="${find_pattern#*\{}"
+          local exts="${remainder%%\}*}"
+          local suffix="${remainder#*\}}"
           local first=true
           find_args+=(-o \()
           IFS=',' read -ra ext_arr <<< "$exts"
           for ext in "${ext_arr[@]}"; do
             if $first; then first=false; else find_args+=(-o); fi
-            find_args+=(-name "${prefix}${ext}")
+            find_args+=(-name "${prefix}${ext}${suffix}")
           done
           find_args+=(\) -print0)
         else
@@ -304,14 +305,15 @@ run_check() {
 
         if [[ "$find_pattern" == *"{"*"}"* ]]; then
           local prefix="${find_pattern%%\{*}"
-          local exts="${find_pattern#*\{}"
-          exts="${exts%%\}*}"
+          local remainder="${find_pattern#*\{}"
+          local exts="${remainder%%\}*}"
+          local suffix="${remainder#*\}}"
           local first=true
           find_args+=(-o \()
           IFS=',' read -ra ext_arr <<< "$exts"
           for ext in "${ext_arr[@]}"; do
             if $first; then first=false; else find_args+=(-o); fi
-            find_args+=(-name "${prefix}${ext}")
+            find_args+=(-name "${prefix}${ext}${suffix}")
           done
           find_args+=(\) -print0)
         else
