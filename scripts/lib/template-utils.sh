@@ -410,16 +410,15 @@ with open(sys.argv[1], 'rb') as f:
     data = tomllib.load(f)
 proj = data.get('project', {})
 name = proj.get('name', '')
-desc = proj.get('description', '')
+desc = proj.get('description', '').replace(chr(31), ' ')
 pkg = name.replace('-', '_')
-print(name)
-print(desc)
-print(pkg)
+print(chr(31).join([name, desc, pkg]))
 " "$dir/pyproject.toml" 2>/dev/null) || return 0
 
-  META_PROJECT_NAME=$(echo "$result" | sed -n '1p')
-  META_DESCRIPTION=$(echo "$result" | sed -n '2p')
-  META_PACKAGE_NAME=$(echo "$result" | sed -n '3p')
+  local delim=$'\x1f'
+  META_PROJECT_NAME=$(printf '%s' "$result" | cut -d "$delim" -f1)
+  META_DESCRIPTION=$(printf '%s' "$result" | cut -d "$delim" -f2)
+  META_PACKAGE_NAME=$(printf '%s' "$result" | cut -d "$delim" -f3)
 }
 
 _extract_node_metadata() {
@@ -432,14 +431,17 @@ _extract_node_metadata() {
   result=$(node -e "
 const fs = require('fs');
 const pkg = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'));
-console.log(pkg.name || '');
-console.log(pkg.description || '');
-console.log((pkg.name || '').replace(/-/g, '_'));
+const sep = String.fromCharCode(31);
+const name = pkg.name || '';
+const desc = (pkg.description || '').replace(new RegExp(sep, 'g'), ' ');
+const pkgName = name.replace(/-/g, '_');
+process.stdout.write([name, desc, pkgName].join(sep));
 " "$dir/package.json" 2>/dev/null) || return 0
 
-  META_PROJECT_NAME=$(echo "$result" | sed -n '1p')
-  META_DESCRIPTION=$(echo "$result" | sed -n '2p')
-  META_PACKAGE_NAME=$(echo "$result" | sed -n '3p')
+  local delim=$'\x1f'
+  META_PROJECT_NAME=$(printf '%s' "$result" | cut -d "$delim" -f1)
+  META_DESCRIPTION=$(printf '%s' "$result" | cut -d "$delim" -f2)
+  META_PACKAGE_NAME=$(printf '%s' "$result" | cut -d "$delim" -f3)
 }
 
 _extract_go_metadata() {
