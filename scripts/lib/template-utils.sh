@@ -163,6 +163,7 @@ detect_stack() {
   # Use tab delimiter to avoid conflicts with colons in Windows paths
   local stack_entries=()
   for tjson in "$TEMPLATES_DIR"/*/template.json; do
+    [ -f "$tjson" ] || continue
     local name
     name=$(json_extract_field "$tjson" "name")
     local layer
