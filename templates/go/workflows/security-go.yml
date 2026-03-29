@@ -193,6 +193,14 @@ jobs:
               body
             });
 
+      # ── Step Summary (visible on scheduled runs without a PR) ──
+      - name: Output to Step Summary
+        if: always()
+        run: |
+          for f in deps-report.md secrets-report.md sast-report.md; do
+            if [ -f "$f" ]; then cat "$f" >> "$GITHUB_STEP_SUMMARY"; printf "\n" >> "$GITHUB_STEP_SUMMARY"; fi
+          done
+
       # ── Optional: Fail on critical ──
       - name: Fail on critical findings
         if: env.BLOCK_ON_CRITICAL == 'true'

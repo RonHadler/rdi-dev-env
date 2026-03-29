@@ -1,15 +1,29 @@
+# Rust Type Check — cargo check
+# Copy to: .github/workflows/typecheck-rust.yml
+
 name: Type Check
 
 on:
-  push:
-    branches: [main, master]
-    paths-ignore:
-      - "**.md"
-      - "docs/**"
   pull_request:
+    branches: ["<!-- CUSTOMIZE: default_branch -->"]
     paths-ignore:
-      - "**.md"
-      - "docs/**"
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.gitignore'
+  push:
+    branches: ["<!-- CUSTOMIZE: default_branch -->"]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: typecheck-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   check:

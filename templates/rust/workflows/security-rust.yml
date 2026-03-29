@@ -40,8 +40,7 @@ jobs:
             if [ -n "$HITS" ]; then
               FOUND=1
               # Show file:line only (never the matched content)
-              MATCHES="${MATCHES}$(printf "%s\n" "$HITS" | awk -F: '{print $1":"$2}')
-          "
+              MATCHES="${MATCHES}$(printf "%s\n" "$HITS" | awk -F: '{print $1":"$2}')"$'\n'
             fi
           done
           if [ "$FOUND" -eq 1 ]; then

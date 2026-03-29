@@ -1,15 +1,29 @@
+# Rust Tests — cargo test + coverage gate
+# Copy to: .github/workflows/test-rust.yml
+
 name: Tests
 
 on:
-  push:
-    branches: [main, master]
-    paths-ignore:
-      - "**.md"
-      - "docs/**"
   pull_request:
+    branches: ["<!-- CUSTOMIZE: default_branch -->"]
     paths-ignore:
-      - "**.md"
-      - "docs/**"
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.gitignore'
+  push:
+    branches: ["<!-- CUSTOMIZE: default_branch -->"]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:

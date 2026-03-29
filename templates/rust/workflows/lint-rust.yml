@@ -1,15 +1,29 @@
+# Rust Lint — clippy
+# Copy to: .github/workflows/lint-rust.yml
+
 name: Lint
 
 on:
-  push:
-    branches: [main, master]
-    paths-ignore:
-      - "**.md"
-      - "docs/**"
   pull_request:
+    branches: ["<!-- CUSTOMIZE: default_branch -->"]
     paths-ignore:
-      - "**.md"
-      - "docs/**"
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.gitignore'
+  push:
+    branches: ["<!-- CUSTOMIZE: default_branch -->"]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   clippy:
