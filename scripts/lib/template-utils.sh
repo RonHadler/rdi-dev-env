@@ -204,7 +204,7 @@ detect_stack() {
         local detect_args="${detect_rule#file_contains:}"
         check_path="${detect_args%%:*}"
         check_pattern="${detect_args#*:}"
-        if [ -f "$project_dir/$check_path" ] && grep -q -e "$check_pattern" -- "$project_dir/$check_path" 2>/dev/null; then
+        if [ -f "$project_dir/$check_path" ] && grep -qE -e "$check_pattern" -- "$project_dir/$check_path" 2>/dev/null; then
           DETECTED_STACK="$name"
           return 0
         fi
@@ -246,7 +246,8 @@ collect_seeded_files() {
       [ -z "$entry" ] && continue
       # Check if key already exists; if so, override its value
       local found=false
-      for i in "${!SEEDED_MAP_KEYS[@]}"; do
+      local keys_len=${#SEEDED_MAP_KEYS[@]}
+      for ((i=0; i<keys_len; i++)); do
         if [ "${SEEDED_MAP_KEYS[$i]}" = "$entry" ]; then
           SEEDED_MAP_VALUES[$i]="$stack"
           found=true
@@ -292,7 +293,8 @@ assemble_file() {
       frag_name=$(basename "$frag_file" .md)
       # Check if already exists; override if so
       local found=false
-      for i in "${!frag_names[@]}"; do
+      local names_len=${#frag_names[@]}
+      for ((i=0; i<names_len; i++)); do
         if [ "${frag_names[$i]}" = "$frag_name" ]; then
           frag_paths[$i]="$frag_file"
           found=true
@@ -318,7 +320,8 @@ assemble_file() {
 
       # Find fragment in map
       local found=false
-      for i in "${!frag_names[@]}"; do
+      local names_len=${#frag_names[@]}
+      for ((i=0; i<names_len; i++)); do
         if [ "${frag_names[$i]}" = "$marker_name" ]; then
           cat "${frag_paths[$i]}" >> "$temp_output"
           found=true
@@ -390,7 +393,7 @@ extract_metadata() {
 
   # Derive display name from project name if not set
   if [ -z "$META_DISPLAY_NAME" ] && [ -n "$META_PROJECT_NAME" ]; then
-    META_DISPLAY_NAME=$(echo "$META_PROJECT_NAME" | sed 's/-/ /g' | sed 's/\b\(.\)/\u\1/g')
+    META_DISPLAY_NAME=$($PYTHON_CMD -c "import sys; print(sys.argv[1].replace('-', ' ').title())" "$META_PROJECT_NAME")
   fi
 }
 

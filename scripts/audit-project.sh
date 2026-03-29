@@ -175,14 +175,15 @@ is_suppressed() {
 
   # Build list of IDs to check: the new ID plus any old aliases that map to it
   local ids_to_check="$check_id"
-  for i in "${!COMPAT_NEW_IDS[@]}"; do
+  local compat_len=${#COMPAT_NEW_IDS[@]}
+  for ((i=0; i<compat_len; i++)); do
     if [ "${COMPAT_NEW_IDS[$i]}" = "$check_id" ]; then
       ids_to_check="$ids_to_check ${COMPAT_OLD_IDS[$i]}"
     fi
   done
 
   # Also check if the check_id itself is an old alias
-  for i in "${!COMPAT_OLD_IDS[@]}"; do
+  for ((i=0; i<compat_len; i++)); do
     if [ "${COMPAT_OLD_IDS[$i]}" = "$check_id" ]; then
       ids_to_check="$ids_to_check ${COMPAT_NEW_IDS[$i]}"
     fi
