@@ -201,10 +201,10 @@ jobs:
       - name: Fail on critical findings
         if: env.BLOCK_ON_CRITICAL == 'true'
         run: |
-          SECRETS="${{ steps.secrets.outputs.count }}"
-          DEPS="${{ steps.deps.outputs.high_critical }}"
+          SECRETS="${{ steps.secrets.outputs.count || '0' }}"
+          DEPS="${{ steps.deps.outputs.high_critical || '0' }}"
 
-          if [ "$SECRETS" -gt 0 ] || [ "$DEPS" -gt 0 ]; then
+          if [ "${SECRETS:-0}" -gt 0 ] || [ "${DEPS:-0}" -gt 0 ]; then
             echo "::error::Critical security findings detected (secrets: $SECRETS, deps high/critical: $DEPS)"
             exit 1
           fi

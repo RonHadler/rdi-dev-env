@@ -247,7 +247,7 @@ jobs:
         if: env.BLOCK_ON_CRITICAL == 'true' && steps.diff.outputs.empty != 'true'
         run: |
           if [ -f severity.json ]; then
-            CRITICAL=$(node -e "console.log(JSON.parse(require('fs').readFileSync('severity.json','utf8')).critical)")
+            CRITICAL=$(node -e "try { console.log(JSON.parse(require('fs').readFileSync('severity.json','utf8')).critical || 0) } catch { console.log(0) }")
             if [ "$CRITICAL" -gt 0 ]; then
               echo "::error::Gemini found $CRITICAL critical issue(s). Review the PR comment for details."
               exit 1

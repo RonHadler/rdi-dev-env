@@ -35,7 +35,7 @@ jobs:
           echo "## Secret Detection" >> $GITHUB_STEP_SUMMARY
           FOUND=0
           for pattern in "PRIVATE.KEY" "BEGIN RSA" "BEGIN DSA" "BEGIN EC" "password\s*=" "secret\s*=" "api_key\s*=" "token\s*="; do
-            if grep -rn --include="*.rs" --include="*.toml" "$pattern" . 2>/dev/null | grep -v target/ | grep -v ".git/"; then
+            if grep -rnE --include="*.rs" --include="*.toml" "$pattern" . 2>/dev/null | grep -v target/ | grep -v ".git/"; then
               FOUND=1
             fi
           done
@@ -54,10 +54,10 @@ jobs:
       - name: Check for unsafe blocks
         run: |
           echo "## Unsafe Block Audit" >> $GITHUB_STEP_SUMMARY
-          UNSAFE_COUNT=$(grep -rn "unsafe\s*{" --include="*.rs" . 2>/dev/null | grep -v target/ | grep -v ".git/" | wc -l)
+          UNSAFE_COUNT=$(grep -rnE 'unsafe\s*\{' --include="*.rs" . 2>/dev/null | grep -v target/ | grep -v ".git/" | wc -l || true)
           if [ "$UNSAFE_COUNT" -gt 0 ]; then
             echo "::warning::Found $UNSAFE_COUNT unsafe block(s) — verify each has a SAFETY comment"
-            grep -rn "unsafe\s*{" --include="*.rs" . 2>/dev/null | grep -v target/ | grep -v ".git/"
+            grep -rnE 'unsafe\s*\{' --include="*.rs" . 2>/dev/null | grep -v target/ | grep -v ".git/" || true
             echo "Found $UNSAFE_COUNT unsafe block(s). Verify each has a \`// SAFETY:\` justification." >> $GITHUB_STEP_SUMMARY
           else
             echo "No unsafe blocks found." >> $GITHUB_STEP_SUMMARY

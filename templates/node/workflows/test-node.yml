@@ -55,7 +55,7 @@ jobs:
             console.log(Math.floor(data.total.lines.pct));
           ")
           echo "Coverage: ${ACTUAL}% (threshold: ${{ env.COVERAGE_THRESHOLD }}%)"
-          if [ "$ACTUAL" -lt "${{ env.COVERAGE_THRESHOLD }}" ]; then
+          if [ "${ACTUAL:-0}" -lt "${{ env.COVERAGE_THRESHOLD }}" ]; then
             echo "::error::Coverage ${ACTUAL}% is below threshold ${{ env.COVERAGE_THRESHOLD }}%"
             exit 1
           fi

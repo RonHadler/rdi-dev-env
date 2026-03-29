@@ -38,7 +38,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Install cargo-tarpaulin
-        run: cargo install cargo-tarpaulin
+        uses: taiki-e/install-action@cargo-tarpaulin
 
       - name: Generate coverage
         run: cargo tarpaulin --out xml --fail-under 80
