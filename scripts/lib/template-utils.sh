@@ -198,7 +198,7 @@ detect_stack() {
         local detect_args="${detect_rule#file_contains:}"
         check_path="${detect_args%%:*}"
         check_pattern="${detect_args#*:}"
-        if [ -f "$project_dir/$check_path" ] && grep -q "$check_pattern" "$project_dir/$check_path" 2>/dev/null; then
+        if [ -f "$project_dir/$check_path" ] && grep -q -e "$check_pattern" -- "$project_dir/$check_path" 2>/dev/null; then
           DETECTED_STACK="$name"
           return 0
         fi
@@ -306,9 +306,9 @@ assemble_file() {
 
   while IFS= read -r line || [ -n "$line" ]; do
     # Check for <!-- FRAGMENT: name --> pattern
-    if echo "$line" | grep -q '<!-- FRAGMENT:'; then
+    if printf '%s' "$line" | grep -q '<!-- FRAGMENT:'; then
       local marker_name
-      marker_name=$(echo "$line" | sed 's/.*<!-- FRAGMENT: \([^ ]*\) -->.*/\1/')
+      marker_name=$(printf '%s' "$line" | sed 's/.*<!-- FRAGMENT: \([^ ]*\) -->.*/\1/')
 
       # Find fragment in map
       local found=false
@@ -322,10 +322,10 @@ assemble_file() {
 
       if [ "$found" = false ]; then
         # Leave marker as-is if fragment not found
-        echo "$line" >> "$temp_output"
+        printf '%s\n' "$line" >> "$temp_output"
       fi
     else
-      echo "$line" >> "$temp_output"
+      printf '%s\n' "$line" >> "$temp_output"
     fi
   done < "$skeleton"
 
@@ -462,7 +462,8 @@ substitute_markers() {
   [ -f "$file" ] || return 0
 
   # Escape sed special characters in values
-  _sed_escape() { printf '%s' "$1" | sed 's/[&/\|]/\\&/g'; }
+  # Escape only characters special to sed with | delimiter: backslash, ampersand, pipe
+  _sed_escape() { printf '%s' "$1" | sed 's/[\\&|]/\\&/g'; }
 
   local project_name; project_name=$(_sed_escape "$META_PROJECT_NAME")
   local description; description=$(_sed_escape "$META_DESCRIPTION")

@@ -32,6 +32,7 @@ NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEV_ENV_DIR="$(dirname "$SCRIPT_DIR")"
 STANDARDS_FILE="$DEV_ENV_DIR/standards.json"
+# shellcheck disable=SC2034  # Used by sourced template-utils.sh
 TEMPLATES_DIR="$DEV_ENV_DIR/templates"
 
 if [ ! -f "$STANDARDS_FILE" ]; then
@@ -43,14 +44,11 @@ fi
 source "$SCRIPT_DIR/lib/template-utils.sh"
 
 # ── Dependencies check ──────────────────────────────────────
-# We need jq or node for JSON parsing
+# Python is required (provided by template-utils.sh as $PYTHON_CMD)
+# Node is optional (used by dashboard JSON parsing if available)
+JSON_TOOL="python"
 if command -v jq &>/dev/null; then
   JSON_TOOL="jq"
-elif command -v node &>/dev/null; then
-  JSON_TOOL="node"
-else
-  echo -e "${RED}Error:${NC} Either jq or node is required" >&2
-  exit 1
 fi
 
 # ── JSON helpers ─────────────────────────────────────────────
@@ -77,35 +75,27 @@ load_standards() {
   local delim=$'\x1f'
   local raw
 
-  raw=$(node -e "
-    const fs = require('fs'), path = require('path');
-    const d = JSON.parse(fs.readFileSync(path.resolve(process.argv[1]), 'utf8'));
-    const sep = '\x1f';
-    process.stdout.write('VERSION' + sep + d.version + '\n');
+  raw=$($PYTHON_CMD -c "
+import json, sys
+sep = chr(31)
+with open(sys.argv[1]) as f:
+    d = json.load(f)
+print('VERSION' + sep + d['version'])
+if 'stacks' in d:
+    for stack_name, stack in d['stacks'].items():
+        for c in stack.get('checks', []):
+            fields = [c['id'], c['name'], c['severity'], c['category'], c['type'], c['path'], c.get('pattern', ''), c.get('remediation', ''), stack_name]
+            print(sep.join(fields))
+    for old_id, new_id in d.get('compat_aliases', {}).items():
+        print('ALIAS' + sep + old_id + sep + new_id)
+elif 'checks' in d:
+    for c in d['checks']:
+        fields = [c['id'], c['name'], c['severity'], c['category'], c['type'], c['path'], c.get('pattern', ''), c.get('remediation', ''), 'all']
+        print(sep.join(fields))
+" "$STANDARDS_FILE") || { echo -e "${RED}Error:${NC} Failed to parse standards.json" >&2; exit 1; }
 
-    // v2 stacks-based format
-    if (d.stacks) {
-      for (const [stackName, stack] of Object.entries(d.stacks)) {
-        for (const c of (stack.checks || [])) {
-          const fields = [c.id, c.name, c.severity, c.category, c.type, c.path, c.pattern || '', c.remediation || '', stackName];
-          process.stdout.write(fields.join(sep) + '\n');
-        }
-      }
-      // Compat aliases
-      if (d.compat_aliases) {
-        for (const [oldId, newId] of Object.entries(d.compat_aliases)) {
-          process.stdout.write('ALIAS' + sep + oldId + sep + newId + '\n');
-        }
-      }
-    }
-    // v1 flat format (backwards compat)
-    else if (d.checks) {
-      for (const c of d.checks) {
-        const fields = [c.id, c.name, c.severity, c.category, c.type, c.path, c.pattern || '', c.remediation || '', 'all'];
-        process.stdout.write(fields.join(sep) + '\n');
-      }
-    }
-  " -- "$STANDARDS_FILE")
+  # Strip Windows carriage returns
+  raw=$(printf '%s' "$raw" | tr -d '\r')
 
   STD_VERSION=$(printf '%s\n' "$raw" | head -1 | cut -d "$delim" -f2)
   STD_COUNT=0
@@ -204,14 +194,14 @@ is_suppressed() {
     fi
   done
 
-  node -e "
-    const fs = require('fs'), path = require('path');
-    const fp = path.resolve(process.argv[1]);
-    const d = JSON.parse(fs.readFileSync(fp, 'utf8'));
-    const idsToCheck = process.argv[2].split(' ');
-    const found = (d.suppress || []).some(s => idsToCheck.includes(s.id));
-    process.exit(found ? 0 : 1);
-  " -- "$baseline_file" "$ids_to_check" 2>/dev/null
+  $PYTHON_CMD -c "
+import json, sys
+with open(sys.argv[1]) as f:
+    d = json.load(f)
+ids = sys.argv[2].split()
+found = any(s['id'] in ids for s in d.get('suppress', []))
+sys.exit(0 if found else 1)
+" "$baseline_file" "$ids_to_check" 2>/dev/null
 }
 
 # ── Run a single check against a project ────────────────────
@@ -724,16 +714,13 @@ show_dashboard() {
     fi
 
     local score pass fail skip critical_fails upstream status_icon
-    if [ "$JSON_TOOL" = "jq" ]; then
-      read -r score pass fail skip critical_fails upstream <<< "$(echo "$json_result" | jq -r '[.score, .pass, .fail, .skip, .critical_failures, .upstream_candidates] | @tsv')"
-    else
-      local parsed
-      parsed=$(node -e "
-        const d = JSON.parse(process.argv[1]);
-        console.log([d.score, d.pass, d.fail, d.skip, d.critical_failures, d.upstream_candidates].join(' '));
-      " -- "$json_result")
-      read -r score pass fail skip critical_fails upstream <<< "$parsed"
-    fi
+    local parsed
+    parsed=$($PYTHON_CMD -c "
+import json, sys
+d = json.loads(sys.argv[1])
+print(d.get('score',0), d.get('pass',0), d.get('fail',0), d.get('skip',0), d.get('critical_failures',0), d.get('upstream_candidates',0))
+" "$json_result" 2>/dev/null) || parsed="0 0 0 0 0 0"
+    read -r score pass fail skip critical_fails upstream <<< "$parsed"
 
     # Guard against empty/non-integer values from failed parsing
     score=${score:-0}; pass=${pass:-0}; fail=${fail:-0}
