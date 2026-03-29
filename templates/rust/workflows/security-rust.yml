@@ -35,7 +35,7 @@ jobs:
           echo "## Secret Detection" >> $GITHUB_STEP_SUMMARY
           FOUND=0
           for pattern in "PRIVATE.KEY" "BEGIN RSA" "BEGIN DSA" "BEGIN EC" "password\s*=" "secret\s*=" "api_key\s*=" "token\s*="; do
-            if grep -rnE --include="*.rs" --include="*.toml" "$pattern" . 2>/dev/null | grep -v target/ | grep -v ".git/" > /dev/null; then
+            if grep -rnE --include="*.rs" --include="*.toml" --exclude-dir=target --exclude-dir=.git "$pattern" . 2>/dev/null > /dev/null; then
               FOUND=1
             fi
           done
@@ -54,10 +54,10 @@ jobs:
       - name: Check for unsafe blocks
         run: |
           echo "## Unsafe Block Audit" >> $GITHUB_STEP_SUMMARY
-          UNSAFE_COUNT=$(grep -rnE 'unsafe\s*\{' --include="*.rs" . 2>/dev/null | grep -v target/ | grep -v ".git/" | wc -l || true)
+          UNSAFE_COUNT=$(grep -rnE 'unsafe\s*\{' --include="*.rs" --exclude-dir=target --exclude-dir=.git . 2>/dev/null | wc -l || true)
           if [ "$UNSAFE_COUNT" -gt 0 ]; then
             echo "::warning::Found $UNSAFE_COUNT unsafe block(s) — verify each has a SAFETY comment"
-            grep -rnE 'unsafe\s*\{' --include="*.rs" . 2>/dev/null | grep -v target/ | grep -v ".git/" || true
+            grep -rnE 'unsafe\s*\{' --include="*.rs" --exclude-dir=target --exclude-dir=.git . 2>/dev/null || true
             echo "Found $UNSAFE_COUNT unsafe block(s). Verify each has a \`// SAFETY:\` justification." >> $GITHUB_STEP_SUMMARY
           else
             echo "No unsafe blocks found." >> $GITHUB_STEP_SUMMARY
@@ -73,9 +73,19 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            github.rest.issues.createComment({
+            const auditResult = '${{ needs.audit.result }}';
+            const secretsResult = '${{ needs.secrets.result }}';
+            const unsafeResult = '${{ needs.unsafe-check.result }}';
+
+            const allPassed = auditResult === 'success' && secretsResult === 'success' && unsafeResult === 'success';
+            const icon = allPassed ? ':white_check_mark:' : ':warning:';
+            const summary = allPassed
+              ? 'All security checks passed.'
+              : `Some checks need attention: audit=${auditResult}, secrets=${secretsResult}, unsafe=${unsafeResult}`;
+
+            await github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: '## Security Scan Results\n\nAll security checks passed. See individual job logs for details.'
+              body: `## ${icon} Security Scan Results\n\n${summary}\n\nSee individual job logs for details.\n\n---\n*Powered by rdi-dev-env security scanner*`
             });

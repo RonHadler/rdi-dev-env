@@ -51,7 +51,8 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
           COMMENT_BODY: ${{ github.event.comment.body }}
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           cat > on-demand.js << 'SCRIPT'
           const { GoogleGenerativeAI } = require('@google/generative-ai');
@@ -62,7 +63,7 @@ jobs:
             const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
             const modelName = process.env.GEMINI_MODEL || 'gemini-2.5-pro';
             const model = genAI.getGenerativeModel({ model: modelName });
-            const defaultBranch = process.env.DEFAULT_BRANCH || 'master';
+            const prNumber = process.env.PR_NUMBER;
             const maxDiffBytes = parseInt(process.env.MAX_DIFF_BYTES) || 512000;
 
             console.log('Using Gemini model: ' + modelName);
@@ -81,16 +82,15 @@ jobs:
             let prompt = '';
 
             if (isCodeReview) {
-              // Get diff with error handling (may fail on issues or if no diff exists)
+              // Use gh pr diff to get the actual PR diff (safe, works on issue_comment trigger)
               let diff = '';
               try {
                 diff = execSync(
-                  'git diff origin/' + defaultBranch + '...HEAD' +
-                  ' -- . ":!*.lock" ":!*.png" ":!*.jpg" ":!coverage/" ":!.next/" ":!dist/" ":!*.min.js" ":!package-lock.json"',
+                  `gh pr diff ${prNumber}`,
                   { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 }
                 );
               } catch (err) {
-                console.log('Warning: Could not generate diff — this may be an issue (not a PR), or the branch has no changes.');
+                console.log('Warning: Could not get PR diff — this may be an issue (not a PR).');
                 diff = '(No diff available — this comment may be on an issue rather than a PR)';
               }
 

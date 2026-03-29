@@ -67,11 +67,9 @@ jobs:
             '(sk-[a-zA-Z0-9]{20,}|AIza[a-zA-Z0-9_-]{35}|AKIA[A-Z0-9]{16}|ghp_[a-zA-Z0-9]{36})' \
             --include='*.ts' --include='*.tsx' --include='*.js' --include='*.jsx' \
             --include='*.yaml' --include='*.yml' --include='*.json' \
-            . 2>/dev/null \
-            | grep -v node_modules | grep -v dist | grep -v coverage \
-            | grep -v '\.test\.' | grep -v '__tests__' \
-            | grep -v 'quality-gate' | grep -v 'ci\.yml' | grep -v 'security\.yml' \
-            || true)
+            --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=coverage --exclude-dir=.git \
+            --exclude='*.test.*' --exclude='ci*.yml' --exclude='security*.yml' \
+            . 2>/dev/null || true)
 
           if [ -n "$KEYS" ]; then
             FOUND=$(echo "$KEYS" | wc -l)
@@ -95,10 +93,9 @@ jobs:
           # eval() usage
           EVALS=$(grep -rnE '\beval\s*\(' \
             --include='*.ts' --include='*.tsx' --include='*.js' --include='*.jsx' \
-            . 2>/dev/null \
-            | grep -v node_modules | grep -v dist \
-            | grep -v '\.test\.' | grep -v '__tests__' \
-            || true)
+            --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=.git \
+            --exclude='*.test.*' \
+            . 2>/dev/null || true)
 
           if [ -n "$EVALS" ]; then
             COUNT=$(echo "$EVALS" | wc -l)
@@ -112,10 +109,9 @@ jobs:
           # innerHTML assignments
           INNER=$(grep -rnE '\.innerHTML\s*=' \
             --include='*.ts' --include='*.tsx' --include='*.js' --include='*.jsx' \
-            . 2>/dev/null \
-            | grep -v node_modules | grep -v dist \
-            | grep -v '\.test\.' | grep -v '__tests__' \
-            || true)
+            --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=.git \
+            --exclude='*.test.*' \
+            . 2>/dev/null || true)
 
           if [ -n "$INNER" ]; then
             COUNT=$(echo "$INNER" | wc -l)
@@ -129,10 +125,9 @@ jobs:
           # child_process with user input
           CHILD=$(grep -rnE '(child_process|execSync|spawnSync|exec\()' \
             --include='*.ts' --include='*.tsx' --include='*.js' --include='*.jsx' \
-            . 2>/dev/null \
-            | grep -v node_modules | grep -v dist \
-            | grep -v '\.test\.' | grep -v '__tests__' \
-            || true)
+            --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=.git \
+            --exclude='*.test.*' \
+            . 2>/dev/null || true)
 
           if [ -n "$CHILD" ]; then
             COUNT=$(echo "$CHILD" | wc -l)

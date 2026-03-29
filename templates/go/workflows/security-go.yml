@@ -67,10 +67,10 @@ jobs:
             '(sk-[a-zA-Z0-9]{20,}|AIza[a-zA-Z0-9_-]{35}|AKIA[A-Z0-9]{16}|ghp_[a-zA-Z0-9]{36})' \
             --include='*.go' --include='*.yaml' --include='*.yml' \
             --include='*.json' --include='*.toml' \
-            . 2>/dev/null \
-            | grep -v vendor | grep -v '_test\.go' \
-            | grep -v 'quality-gate' | grep -v 'ci\.yml' | grep -v 'security\.yml' \
-            || true)
+            --exclude-dir=vendor --exclude-dir=.git \
+            --exclude='*_test.go' \
+            --exclude='ci*.yml' --exclude='security*.yml' --exclude='quality-gate*' \
+            . 2>/dev/null || true)
 
           if [ -n "$KEYS" ]; then
             FOUND=$(echo "$KEYS" | wc -l)
@@ -94,9 +94,9 @@ jobs:
           # unsafe package usage
           UNSAFE=$(grep -rnE '\b"unsafe"\b' \
             --include='*.go' \
-            . 2>/dev/null \
-            | grep -v vendor | grep -v '_test\.go' \
-            || true)
+            --exclude-dir=vendor --exclude-dir=.git \
+            --exclude='*_test.go' \
+            . 2>/dev/null || true)
 
           if [ -n "$UNSAFE" ]; then
             COUNT=$(echo "$UNSAFE" | wc -l)
@@ -110,9 +110,9 @@ jobs:
           # os/exec with potential user input
           EXEC=$(grep -rnE 'exec\.Command\(' \
             --include='*.go' \
-            . 2>/dev/null \
-            | grep -v vendor | grep -v '_test\.go' \
-            || true)
+            --exclude-dir=vendor --exclude-dir=.git \
+            --exclude='*_test.go' \
+            . 2>/dev/null || true)
 
           if [ -n "$EXEC" ]; then
             COUNT=$(echo "$EXEC" | wc -l)
@@ -126,9 +126,9 @@ jobs:
           # SQL string concatenation (potential injection)
           SQLI=$(grep -rnE '(fmt\.Sprintf|"+.*\+).*([Ss][Ee][Ll][Ee][Cc][Tt]|[Ii][Nn][Ss][Ee][Rr][Tt]|[Uu][Pp][Dd][Aa][Tt][Ee]|[Dd][Ee][Ll][Ee][Tt][Ee])' \
             --include='*.go' \
-            . 2>/dev/null \
-            | grep -v vendor | grep -v '_test\.go' \
-            || true)
+            --exclude-dir=vendor --exclude-dir=.git \
+            --exclude='*_test.go' \
+            . 2>/dev/null || true)
 
           if [ -n "$SQLI" ]; then
             COUNT=$(echo "$SQLI" | wc -l)

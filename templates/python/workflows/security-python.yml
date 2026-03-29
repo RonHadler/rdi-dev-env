@@ -80,13 +80,12 @@ jobs:
 
           KEYS=$(grep -rnE \
             '(sk-[a-zA-Z0-9]{20,}|AIza[a-zA-Z0-9_-]{35}|AKIA[A-Z0-9]{16}|ghp_[a-zA-Z0-9]{36})' \
-            --include='*.py' --include='*.ts' --include='*.tsx' --include='*.js' \
-            --include='*.go' --include='*.yaml' --include='*.yml' \
-            . 2>/dev/null \
-            | grep -v node_modules | grep -v __pycache__ | grep -v .venv \
-            | grep -v '\.test\.' | grep -v 'test_' | grep -v '__tests__' \
-            | grep -v 'quality-gate' | grep -v 'ci\.yml' | grep -v 'security\.yml' \
-            || true)
+            --include='*.py' --include='*.yaml' --include='*.yml' \
+            --exclude-dir=__pycache__ --exclude-dir=.venv --exclude-dir=.git \
+            --exclude-dir=node_modules \
+            --exclude='test_*' --exclude='conftest.py' \
+            --exclude='ci*.yml' --exclude='security*.yml' --exclude='quality-gate*' \
+            . 2>/dev/null || true)
 
           if [ -n "$KEYS" ]; then
             FOUND=$(echo "$KEYS" | wc -l)
@@ -110,10 +109,9 @@ jobs:
           # eval() / exec() usage
           EVALS=$(grep -rnE '\b(eval|exec)\s*\(' \
             --include='*.py' \
-            . 2>/dev/null \
-            | grep -v __pycache__ | grep -v .venv \
-            | grep -v 'test_' | grep -v 'conftest' \
-            || true)
+            --exclude-dir=__pycache__ --exclude-dir=.venv --exclude-dir=.git \
+            --exclude='test_*' --exclude='conftest.py' \
+            . 2>/dev/null || true)
 
           if [ -n "$EVALS" ]; then
             COUNT=$(echo "$EVALS" | wc -l)
@@ -127,10 +125,9 @@ jobs:
           # subprocess with shell=True
           SHELL_TRUE=$(grep -rnE 'subprocess\.\w+\(.*shell\s*=\s*True' \
             --include='*.py' \
-            . 2>/dev/null \
-            | grep -v __pycache__ | grep -v .venv \
-            | grep -v 'test_' | grep -v 'conftest' \
-            || true)
+            --exclude-dir=__pycache__ --exclude-dir=.venv --exclude-dir=.git \
+            --exclude='test_*' --exclude='conftest.py' \
+            . 2>/dev/null || true)
 
           if [ -n "$SHELL_TRUE" ]; then
             COUNT=$(echo "$SHELL_TRUE" | wc -l)
@@ -144,10 +141,9 @@ jobs:
           # pickle deserialization
           PICKLE=$(grep -rnE '\bpickle\.(load|loads)\b' \
             --include='*.py' \
-            . 2>/dev/null \
-            | grep -v __pycache__ | grep -v .venv \
-            | grep -v 'test_' | grep -v 'conftest' \
-            || true)
+            --exclude-dir=__pycache__ --exclude-dir=.venv --exclude-dir=.git \
+            --exclude='test_*' --exclude='conftest.py' \
+            . 2>/dev/null || true)
 
           if [ -n "$PICKLE" ]; then
             COUNT=$(echo "$PICKLE" | wc -l)

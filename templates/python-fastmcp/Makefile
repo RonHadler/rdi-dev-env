@@ -37,4 +37,4 @@ build:  ## Build Docker image
 
 clean:  ## Remove cache directories
 	rm -rf __pycache__ .pytest_cache .mypy_cache .ruff_cache .coverage htmlcov
-	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+	find . -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true
