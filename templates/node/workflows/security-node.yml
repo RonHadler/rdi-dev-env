@@ -1,0 +1,218 @@
+# Node.js Security Scan — npm audit + secret detection + SAST
+# Copy to: .github/workflows/security-node.yml
+
+name: Security Scan
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  schedule:
+    - cron: '0 6 * * 1'  # Weekly Monday 6:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  BLOCK_ON_CRITICAL: 'false'
+
+jobs:
+  security-scan:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # ── Tier 1: Dependency Vulnerabilities ──
+      - name: Dependency audit
+        id: deps
+        continue-on-error: true
+        run: |
+          echo "## Dependency Audit" > deps-report.md
+          HIGH=0
+
+          AUDIT_OUTPUT=$(npm audit --json 2>/dev/null || true)
+
+          if [ -n "$AUDIT_OUTPUT" ]; then
+            HIGH=$(printf "%s" "$AUDIT_OUTPUT" | node -e "
+              const data = require('fs').readFileSync('/dev/stdin', 'utf8');
+              try {
+                const j = JSON.parse(data);
+                const v = j.metadata?.vulnerabilities || {};
+                console.log((v.high || 0) + (v.critical || 0));
+              } catch { console.log(0); }
+            " 2>/dev/null || echo "0")
+          fi
+
+          echo "high_critical=$HIGH" >> "$GITHUB_OUTPUT"
+
+          if [ "$HIGH" -gt 0 ]; then
+            echo "**Found $HIGH high/critical vulnerability(ies):**" >> deps-report.md
+            echo '```' >> deps-report.md
+            npm audit --audit-level=high 2>/dev/null | head -30 >> deps-report.md || true
+            echo '```' >> deps-report.md
+          else
+            echo "No high/critical vulnerabilities found." >> deps-report.md
+          fi
+
+      # ── Tier 2: Secret Detection ──
+      - name: Secret detection
+        id: secrets
+        run: |
+          echo "## Secret Detection" > secrets-report.md
+          FOUND=0
+
+          KEYS=$(grep -rnE \
+            '(sk-[a-zA-Z0-9]{20,}|AIza[a-zA-Z0-9_-]{35}|AKIA[A-Z0-9]{16}|ghp_[a-zA-Z0-9]{36})' \
+            --include='*.ts' --include='*.tsx' --include='*.js' --include='*.jsx' \
+            --include='*.yaml' --include='*.yml' --include='*.json' \
+            --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=coverage --exclude-dir=.git \
+            --exclude='*.test.*' --exclude='ci*.yml' --exclude='security*.yml' \
+            . 2>/dev/null || true)
+
+          if [ -n "$KEYS" ]; then
+            FOUND=$(printf "%s\n" "$KEYS" | wc -l)
+            echo "**CRITICAL: Possible hardcoded API keys found ($FOUND occurrences)**" >> secrets-report.md
+            echo '```' >> secrets-report.md
+            printf "%s\n" "$KEYS" | awk -F: '{print $1":"$2}' | head -10 >> secrets-report.md
+            echo '```' >> secrets-report.md
+          else
+            echo "No hardcoded secrets detected." >> secrets-report.md
+          fi
+
+          echo "count=$FOUND" >> "$GITHUB_OUTPUT"
+
+      # ── Tier 3: SAST Patterns ──
+      - name: SAST pattern check
+        id: sast
+        run: |
+          echo "## SAST Patterns" > sast-report.md
+          FOUND=0
+
+          # eval() usage
+          EVALS=$(grep -rnE '\beval\s*\(' \
+            --include='*.ts' --include='*.tsx' --include='*.js' --include='*.jsx' \
+            --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=.git \
+            --exclude='*.test.*' \
+            . 2>/dev/null || true)
+
+          if [ -n "$EVALS" ]; then
+            COUNT=$(printf "%s\n" "$EVALS" | wc -l)
+            FOUND=$((FOUND + COUNT))
+            echo "**eval() usage ($COUNT occurrences):**" >> sast-report.md
+            echo '```' >> sast-report.md
+            printf "%s\n" "$EVALS" | head -5 >> sast-report.md
+            echo '```' >> sast-report.md
+          fi
+
+          # innerHTML assignments
+          INNER=$(grep -rnE '\.innerHTML\s*=' \
+            --include='*.ts' --include='*.tsx' --include='*.js' --include='*.jsx' \
+            --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=.git \
+            --exclude='*.test.*' \
+            . 2>/dev/null || true)
+
+          if [ -n "$INNER" ]; then
+            COUNT=$(printf "%s\n" "$INNER" | wc -l)
+            FOUND=$((FOUND + COUNT))
+            echo "**innerHTML assignment ($COUNT occurrences):**" >> sast-report.md
+            echo '```' >> sast-report.md
+            printf "%s\n" "$INNER" | head -5 >> sast-report.md
+            echo '```' >> sast-report.md
+          fi
+
+          # child_process with user input
+          CHILD=$(grep -rnE '(child_process|execSync|spawnSync|exec\()' \
+            --include='*.ts' --include='*.tsx' --include='*.js' --include='*.jsx' \
+            --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=.git \
+            --exclude='*.test.*' \
+            . 2>/dev/null || true)
+
+          if [ -n "$CHILD" ]; then
+            COUNT=$(printf "%s\n" "$CHILD" | wc -l)
+            FOUND=$((FOUND + COUNT))
+            echo "**child_process usage ($COUNT occurrences):**" >> sast-report.md
+            echo '```' >> sast-report.md
+            printf "%s\n" "$CHILD" | head -5 >> sast-report.md
+            echo '```' >> sast-report.md
+          fi
+
+          if [ "$FOUND" -eq 0 ]; then
+            echo "No SAST patterns detected." >> sast-report.md
+          fi
+
+          echo "count=$FOUND" >> "$GITHUB_OUTPUT"
+
+      # ── Post Summary ──
+      - name: Post security report
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return 'Scan skipped.'; } };
+            const deps = read('deps-report.md');
+            const secrets = read('secrets-report.md');
+            const sast = read('sast-report.md');
+
+            const depsCount = '${{ steps.deps.outputs.high_critical }}' || '0';
+            const secretsCount = '${{ steps.secrets.outputs.count }}' || '0';
+            const sastCount = '${{ steps.sast.outputs.count }}' || '0';
+
+            const total = parseInt(depsCount) + parseInt(secretsCount) + parseInt(sastCount);
+            const status = total > 0 ? ':warning:' : ':white_check_mark:';
+
+            const body = [
+              `## ${status} Security Scan Summary`,
+              '',
+              '| Check | Findings |',
+              '|-------|----------|',
+              `| Dependencies (high/critical) | ${depsCount} |`,
+              `| Hardcoded Secrets | ${secretsCount} |`,
+              `| SAST Patterns | ${sastCount} |`,
+              '',
+              '---',
+              '',
+              deps,
+              '',
+              secrets,
+              '',
+              sast,
+              '',
+              '---',
+              '*Powered by rdi-dev-env security scanner*'
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body
+            });
+
+      # ── Step Summary (visible on scheduled runs without a PR) ──
+      - name: Output to Step Summary
+        if: always()
+        run: |
+          for f in deps-report.md secrets-report.md sast-report.md; do
+            if [ -f "$f" ]; then cat "$f" >> "$GITHUB_STEP_SUMMARY"; printf "\n" >> "$GITHUB_STEP_SUMMARY"; fi
+          done
+
+      # ── Optional: Fail on critical ──
+      - name: Fail on critical findings
+        if: env.BLOCK_ON_CRITICAL == 'true'
+        run: |
+          SECRETS="${{ steps.secrets.outputs.count || '0' }}"
+          DEPS="${{ steps.deps.outputs.high_critical || '0' }}"
+
+          if [ "${SECRETS:-0}" -gt 0 ] || [ "${DEPS:-0}" -gt 0 ]; then
+            echo "::error::Critical security findings detected (secrets: $SECRETS, deps high/critical: $DEPS)"
+            exit 1
+          fi

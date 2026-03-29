@@ -1,0 +1,3 @@
+module github.com/RonHadler/<!-- CUSTOMIZE: project-name -->
+
+go 1.23

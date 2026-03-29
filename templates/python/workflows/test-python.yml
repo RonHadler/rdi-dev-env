@@ -1,0 +1,77 @@
+# Python Tests — pytest + coverage gate
+# Copy to: .github/workflows/test-python.yml
+
+name: Tests
+
+on:
+  pull_request:
+    branches: ["<!-- CUSTOMIZE: default_branch -->"]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.gitignore'
+  push:
+    branches: ["<!-- CUSTOMIZE: default_branch -->"]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: '3.12'
+  COVERAGE_THRESHOLD: 80
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Run tests with coverage
+        run: |
+          uv run pytest tests/ \
+            --cov=<!-- CUSTOMIZE: package_name --> \
+            --cov-report=term-missing \
+            --cov-report=json:coverage.json \
+            -v
+
+      - name: Enforce coverage threshold
+        if: env.COVERAGE_THRESHOLD != '0'
+        run: |
+          ACTUAL=$(python3 -c "
+          import json
+          with open('coverage.json') as f:
+              data = json.load(f)
+          print(int(data['totals']['percent_covered']))
+          ")
+          echo "Coverage: ${ACTUAL}% (threshold: ${{ env.COVERAGE_THRESHOLD }}%)"
+          if [ "${ACTUAL:-0}" -lt "${{ env.COVERAGE_THRESHOLD }}" ]; then
+            echo "::error::Coverage ${ACTUAL}% is below threshold ${{ env.COVERAGE_THRESHOLD }}%"
+            exit 1
+          fi
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.json

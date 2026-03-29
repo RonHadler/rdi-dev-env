@@ -1,0 +1,68 @@
+# Node.js Tests — Vitest + coverage gate
+# Copy to: .github/workflows/test-node.yml
+
+name: Tests
+
+on:
+  pull_request:
+    branches: ["<!-- CUSTOMIZE: default_branch -->"]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.gitignore'
+  push:
+    branches: ["<!-- CUSTOMIZE: default_branch -->"]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '22'
+  COVERAGE_THRESHOLD: 80
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests with coverage
+        run: npx vitest run --coverage --coverage.reporter=json-summary --coverage.reporter=text
+
+      - name: Enforce coverage threshold
+        if: env.COVERAGE_THRESHOLD != '0'
+        run: |
+          ACTUAL=$(node -e "
+            const data = require('./coverage/coverage-summary.json');
+            console.log(Math.floor(data.total.lines.pct));
+          ")
+          echo "Coverage: ${ACTUAL}% (threshold: ${{ env.COVERAGE_THRESHOLD }}%)"
+          if [ "${ACTUAL:-0}" -lt "${{ env.COVERAGE_THRESHOLD }}" ]; then
+            echo "::error::Coverage ${ACTUAL}% is below threshold ${{ env.COVERAGE_THRESHOLD }}%"
+            exit 1
+          fi
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/

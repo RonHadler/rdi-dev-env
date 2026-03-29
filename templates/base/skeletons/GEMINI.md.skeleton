@@ -1,0 +1,47 @@
+# <!-- CUSTOMIZE: Project Name --> - Gemini Code Review Context
+
+> **Shared Context:** See [AGENTS.md](AGENTS.md) for project overview, architecture, security, and file structure.
+
+This file contains Gemini-specific code review standards and guidelines.
+
+---
+
+## Review Focus Areas
+
+<!-- FRAGMENT: gemini-review-focus -->
+
+---
+
+## Code Quality Standards
+
+<!-- FRAGMENT: gemini-quality-standards -->
+
+---
+
+## Architectural Constraints
+
+<!-- FRAGMENT: gemini-architectural-constraints -->
+
+---
+
+## Common Violations to Flag
+
+<!-- FRAGMENT: gemini-common-violations -->
+
+---
+
+## Review Guidelines
+
+<!-- FRAGMENT: gemini-review-guidelines -->
+
+---
+
+## Testing Standards
+
+<!-- FRAGMENT: gemini-testing-standards -->
+
+---
+
+<!-- CUSTOMIZE: Update date and version -->
+*Last Updated: <!-- CUSTOMIZE: date -->*
+*Version: 1.0*

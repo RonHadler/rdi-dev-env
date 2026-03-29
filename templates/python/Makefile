@@ -1,12 +1,9 @@
-.PHONY: dev-serve dev-stdio test test-quick smoke lint format type-check build clean
+.PHONY: dev test test-quick lint format type-check build clean
 
 # ── Development ──────────────────────────────────────────────
 
-dev-serve:  ## Start server (Streamable HTTP, default port)
-	uv run python -m <!-- CUSTOMIZE: package_name -->.server
-
-dev-stdio:  ## Start server (stdio transport for local MCP clients)
-	<!-- CUSTOMIZE: PACKAGE_NAME -->_TRANSPORT=stdio uv run python -m <!-- CUSTOMIZE: package_name -->.server
+dev:  ## Start development server
+	uv run python -m <!-- CUSTOMIZE: package_name -->
 
 # ── Testing ──────────────────────────────────────────────────
 
@@ -15,9 +12,6 @@ test:  ## Run tests with coverage
 
 test-quick:  ## Run tests without coverage
 	uv run pytest -v
-
-smoke:  ## Run smoke tests against deployed server
-	uv run pytest tests/smoke/ -v -m smoke --tb=short
 
 # ── Code Quality ─────────────────────────────────────────────
 

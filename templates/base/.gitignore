@@ -1,0 +1,23 @@
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Agent context
+.claude/
+.gemini/
+
+# SDLC pipeline
+.sdlc/
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Environment files (secrets)
+.env
+.env.local
+# .env.development is checked in (shared, no secrets)

@@ -1,0 +1,4 @@
+- **TypeScript Docs**: https://www.typescriptlang.org/docs/
+- **Node.js Docs**: https://nodejs.org/docs/latest-v22.x/api/
+- **Vitest Docs**: https://vitest.dev/guide/
+- **ESLint Docs**: https://eslint.org/docs/latest/

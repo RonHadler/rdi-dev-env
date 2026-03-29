@@ -1,0 +1,49 @@
+{
+  "name": "python",
+  "description": "Python project foundation: uv, pytest, ruff, mypy, Docker",
+  "layer": 1,
+  "extends": "base",
+  "detect": { "file_exists": "pyproject.toml" },
+  "markers": ["Project Name", "project-name", "package_name", "PACKAGE_NAME", "description", "date"],
+  "files": {
+    "managed": [
+      ".github/workflows/lint-python.yml",
+      ".github/workflows/typecheck-python.yml",
+      ".github/workflows/test-python.yml",
+      ".github/workflows/security-python.yml",
+      ".github/workflows/gemini-code-review.yml",
+      ".github/workflows/gemini-on-demand.yml",
+      ".github/workflows/stale.yml",
+      ".github/dependabot.yml"
+    ],
+    "seeded": [
+      "pyproject.toml",
+      "Dockerfile",
+      "Makefile",
+      ".env.example",
+      "CLAUDE.md",
+      "AGENTS.md",
+      "GEMINI.md"
+    ]
+  },
+  "fragments": {
+    "CLAUDE.md": [
+      "claude-commands",
+      "claude-resources"
+    ],
+    "AGENTS.md": [
+      "agents-tech-stack",
+      "agents-file-structure",
+      "agents-env-vars",
+      "agents-commands"
+    ],
+    "GEMINI.md": [
+      "gemini-quality-standards",
+      "gemini-testing-standards"
+    ]
+  },
+  "scaffold": {
+    "directories": ["tests", "tests/tools"],
+    "files": {}
+  }
+}

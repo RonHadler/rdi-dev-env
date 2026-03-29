@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.whl
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment files (secrets)
+.env
+.env.local
+# .env.development is checked in (shared, no secrets)
+
+# Coverage
+.coverage
+htmlcov/
+coverage.xml
+
+# Tools
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# DO NOT ignore uv.lock — reproducible builds
