@@ -189,6 +189,9 @@ jobs:
                 if (jsonMatch) {
                   const counts = JSON.parse(jsonMatch[1]);
                   fs.writeFileSync('severity.json', JSON.stringify(counts));
+                } else {
+                  console.log('Warning: No SEVERITY_JSON block found in response');
+                  fs.writeFileSync('severity.json', '{"critical": 0, "high": 0, "medium": 0, "low": 0}');
                 }
               } catch (jsonErr) {
                 console.log('Warning: Could not parse severity JSON from review — skipping counts');

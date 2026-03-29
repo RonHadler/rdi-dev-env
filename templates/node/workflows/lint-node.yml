@@ -41,6 +41,9 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
+        # Uses npm ci for reproducible builds. Scaffolding script generates
+        # package-lock.json before initial commit. For pnpm: update to
+        # corepack enable && pnpm install --frozen-lockfile
         run: npm ci
 
       - name: Lint

@@ -42,9 +42,7 @@ jobs:
         run: |
           echo "## Dependency Audit" > deps-report.md
 
-          uv pip install pip-audit
-
-          AUDIT_OUTPUT=$(uv run pip-audit --format=json 2>/dev/null || true)
+          AUDIT_OUTPUT=$(uvx pip-audit --format=json 2>/dev/null || true)
           HIGH=0
           TOTAL=0
 
