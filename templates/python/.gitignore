@@ -12,6 +12,11 @@ build/
 venv/
 env/
 
+# Environment files (secrets)
+.env
+.env.local
+# .env.development is checked in (shared, no secrets)
+
 # Coverage
 .coverage
 htmlcov/
