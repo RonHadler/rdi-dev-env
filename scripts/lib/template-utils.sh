@@ -477,8 +477,8 @@ substitute_markers() {
   [ -f "$file" ] || return 0
 
   # Escape sed special characters in values
-  # Escape only characters special to sed with | delimiter: backslash, ampersand, pipe
-  _sed_escape() { printf '%s' "$1" | sed 's/[\\&|]/\\&/g'; }
+  # Escape characters special to sed with | delimiter, and replace newlines with spaces
+  _sed_escape() { printf '%s' "$1" | tr '\n' ' ' | sed 's/[\\&|]/\\&/g'; }
 
   local project_name; project_name=$(_sed_escape "$META_PROJECT_NAME")
   local description; description=$(_sed_escape "$META_DESCRIPTION")

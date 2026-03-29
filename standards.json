@@ -14,7 +14,7 @@
           "category": "security",
           "description": "Source files must not contain hardcoded API keys or tokens",
           "type": "file_not_contains",
-          "path": "**/*.{py,go,rs,ts,tsx,js,jsx}",
+          "path": "**/*.{py,go,rs,ts,tsx,js,jsx,yaml,yml,json}",
           "pattern": "(sk-[a-zA-Z0-9_-]{20,}|AIza[a-zA-Z0-9_-]{35}|AKIA[A-Z0-9]{16}|ghp_[a-zA-Z0-9]{36})",
           "remediation": "Move secrets to .env files or secret manager"
         },
