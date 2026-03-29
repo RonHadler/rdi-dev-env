@@ -43,11 +43,12 @@ jobs:
 
           VULN_OUTPUT=$(govulncheck ./... 2>&1 || true)
 
-          if echo "$VULN_OUTPUT" | grep -q "Vulnerability"; then
-            TOTAL=$(echo "$VULN_OUTPUT" | grep -c "Vulnerability" || true)
+          TOTAL=$(printf "%s\n" "$VULN_OUTPUT" | grep -c "Vulnerability" || true)
+
+          if [ "$TOTAL" -gt 0 ]; then
             echo "**Found $TOTAL vulnerability(ies):**" >> deps-report.md
             echo '```' >> deps-report.md
-            echo "$VULN_OUTPUT" | head -30 >> deps-report.md
+            printf "%s\n" "$VULN_OUTPUT" | head -30 >> deps-report.md
             echo '```' >> deps-report.md
           else
             echo "No known vulnerabilities found." >> deps-report.md
@@ -73,7 +74,7 @@ jobs:
             . 2>/dev/null || true)
 
           if [ -n "$KEYS" ]; then
-            FOUND=$(echo "$KEYS" | wc -l)
+            FOUND=$(printf "%s\n" "$KEYS" | wc -l)
             echo "**CRITICAL: Possible hardcoded API keys found ($FOUND occurrences)**" >> secrets-report.md
             echo '```' >> secrets-report.md
             printf "%s\n" "$KEYS" | awk -F: '{print $1":"$2}' | head -10 >> secrets-report.md
@@ -99,11 +100,11 @@ jobs:
             . 2>/dev/null || true)
 
           if [ -n "$UNSAFE" ]; then
-            COUNT=$(echo "$UNSAFE" | wc -l)
+            COUNT=$(printf "%s\n" "$UNSAFE" | wc -l)
             FOUND=$((FOUND + COUNT))
             echo "**unsafe package usage ($COUNT occurrences):**" >> sast-report.md
             echo '```' >> sast-report.md
-            echo "$UNSAFE" | head -5 >> sast-report.md
+            printf "%s\n" "$UNSAFE" | head -5 >> sast-report.md
             echo '```' >> sast-report.md
           fi
 
@@ -115,11 +116,11 @@ jobs:
             . 2>/dev/null || true)
 
           if [ -n "$EXEC" ]; then
-            COUNT=$(echo "$EXEC" | wc -l)
+            COUNT=$(printf "%s\n" "$EXEC" | wc -l)
             FOUND=$((FOUND + COUNT))
             echo "**os/exec usage ($COUNT occurrences) — verify no user input:**" >> sast-report.md
             echo '```' >> sast-report.md
-            echo "$EXEC" | head -5 >> sast-report.md
+            printf "%s\n" "$EXEC" | head -5 >> sast-report.md
             echo '```' >> sast-report.md
           fi
 
@@ -131,11 +132,11 @@ jobs:
             . 2>/dev/null || true)
 
           if [ -n "$SQLI" ]; then
-            COUNT=$(echo "$SQLI" | wc -l)
+            COUNT=$(printf "%s\n" "$SQLI" | wc -l)
             FOUND=$((FOUND + COUNT))
             echo "**Potential SQL injection ($COUNT occurrences):**" >> sast-report.md
             echo '```' >> sast-report.md
-            echo "$SQLI" | head -5 >> sast-report.md
+            printf "%s\n" "$SQLI" | head -5 >> sast-report.md
             echo '```' >> sast-report.md
           fi
 

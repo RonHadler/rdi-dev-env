@@ -88,7 +88,7 @@ jobs:
             . 2>/dev/null || true)
 
           if [ -n "$KEYS" ]; then
-            FOUND=$(echo "$KEYS" | wc -l)
+            FOUND=$(printf "%s\n" "$KEYS" | wc -l)
             echo "**CRITICAL: Possible hardcoded API keys found ($FOUND occurrences)**" >> secrets-report.md
             echo '```' >> secrets-report.md
             printf "%s\n" "$KEYS" | awk -F: '{print $1":"$2}' | head -10 >> secrets-report.md
@@ -114,11 +114,11 @@ jobs:
             . 2>/dev/null || true)
 
           if [ -n "$EVALS" ]; then
-            COUNT=$(echo "$EVALS" | wc -l)
+            COUNT=$(printf "%s\n" "$EVALS" | wc -l)
             FOUND=$((FOUND + COUNT))
             echo "**eval()/exec() usage ($COUNT occurrences):**" >> sast-report.md
             echo '```' >> sast-report.md
-            echo "$EVALS" | head -5 >> sast-report.md
+            printf "%s\n" "$EVALS" | head -5 >> sast-report.md
             echo '```' >> sast-report.md
           fi
 
@@ -130,11 +130,11 @@ jobs:
             . 2>/dev/null || true)
 
           if [ -n "$SHELL_TRUE" ]; then
-            COUNT=$(echo "$SHELL_TRUE" | wc -l)
+            COUNT=$(printf "%s\n" "$SHELL_TRUE" | wc -l)
             FOUND=$((FOUND + COUNT))
             echo "**subprocess shell=True ($COUNT occurrences):**" >> sast-report.md
             echo '```' >> sast-report.md
-            echo "$SHELL_TRUE" | head -5 >> sast-report.md
+            printf "%s\n" "$SHELL_TRUE" | head -5 >> sast-report.md
             echo '```' >> sast-report.md
           fi
 
@@ -146,11 +146,11 @@ jobs:
             . 2>/dev/null || true)
 
           if [ -n "$PICKLE" ]; then
-            COUNT=$(echo "$PICKLE" | wc -l)
+            COUNT=$(printf "%s\n" "$PICKLE" | wc -l)
             FOUND=$((FOUND + COUNT))
             echo "**pickle deserialization ($COUNT occurrences):**" >> sast-report.md
             echo '```' >> sast-report.md
-            echo "$PICKLE" | head -5 >> sast-report.md
+            printf "%s\n" "$PICKLE" | head -5 >> sast-report.md
             echo '```' >> sast-report.md
           fi
 
