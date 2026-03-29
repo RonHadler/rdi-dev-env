@@ -17,7 +17,7 @@ FROM alpine:3.21
 RUN apk --no-cache add ca-certificates \
     && adduser -D -g '' appuser
 
-COPY --from=builder /app/server /app/server
+COPY --from=builder --chown=appuser:appuser /app/server /app/server
 
 USER appuser
 

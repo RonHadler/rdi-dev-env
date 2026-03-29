@@ -4,8 +4,7 @@ FROM node:22-alpine AS builder
 WORKDIR /app
 
 # Copy package manifests (support both npm and pnpm)
-COPY package.json package-lock.json* ./
-COPY pnpm-lock.yaml* ./
+COPY package.json package-lock.json* pnpm-lock.yaml* ./
 
 # Install dependencies — detect lock file and use appropriate tool
 RUN if [ -f pnpm-lock.yaml ]; then \

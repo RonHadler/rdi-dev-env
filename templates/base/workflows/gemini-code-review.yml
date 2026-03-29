@@ -101,10 +101,10 @@ jobs:
           fi
 
           # Truncate if too large
-          BYTE_COUNT=$(echo "$DIFF" | wc -c)
+          BYTE_COUNT=$(printf "%s" "$DIFF" | wc -c)
           if [ "$BYTE_COUNT" -gt "${{ env.MAX_DIFF_BYTES }}" ]; then
             echo "::warning::Diff is ${BYTE_COUNT} bytes, truncating to ${{ env.MAX_DIFF_BYTES }} bytes"
-            DIFF="$(echo "$DIFF" | head -c "${{ env.MAX_DIFF_BYTES }}")$(printf '\n\n[TRUNCATED — diff exceeded %s bytes, showing first %s]' "$BYTE_COUNT" "${{ env.MAX_DIFF_BYTES }}")"
+            DIFF="$(printf "%s" "$DIFF" | head -c "${{ env.MAX_DIFF_BYTES }}")$(printf '\n\n[TRUNCATED — diff exceeded %s bytes, showing first %s]' "$BYTE_COUNT" "${{ env.MAX_DIFF_BYTES }}")"
           fi
 
           # Write to file (avoids shell escaping issues)
@@ -182,11 +182,17 @@ jobs:
               fs.writeFileSync('review.md', text);
               console.log(text);
 
-              // Extract severity counts
-              const jsonMatch = text.match(/SEVERITY_JSON:\s*```json\s*({[^}]+})\s*```/);
-              if (jsonMatch) {
-                const counts = JSON.parse(jsonMatch[1]);
-                fs.writeFileSync('severity.json', JSON.stringify(counts));
+              // Extract severity counts (inner try/catch so malformed JSON
+              // doesn't discard the valuable review text)
+              try {
+                const jsonMatch = text.match(/SEVERITY_JSON:\s*```json\s*({[^}]+})\s*```/);
+                if (jsonMatch) {
+                  const counts = JSON.parse(jsonMatch[1]);
+                  fs.writeFileSync('severity.json', JSON.stringify(counts));
+                }
+              } catch (jsonErr) {
+                console.log('Warning: Could not parse severity JSON from review — skipping counts');
+                fs.writeFileSync('severity.json', '{"critical": 0, "high": 0, "medium": 0, "low": 0}');
               }
             } catch (error) {
               console.error('Error calling Gemini API:', error.message);

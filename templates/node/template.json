@@ -19,6 +19,7 @@
     "seeded": [
       "package.json",
       "tsconfig.json",
+      "eslint.config.js",
       "Dockerfile",
       "Makefile",
       "CLAUDE.md",

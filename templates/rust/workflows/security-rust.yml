@@ -34,13 +34,22 @@ jobs:
         run: |
           echo "## Secret Detection" >> $GITHUB_STEP_SUMMARY
           FOUND=0
+          MATCHES=""
           for pattern in "PRIVATE.KEY" "BEGIN RSA" "BEGIN DSA" "BEGIN EC" "password\s*=" "secret\s*=" "api_key\s*=" "token\s*="; do
-            if grep -rnE --include="*.rs" --include="*.toml" --exclude-dir=target --exclude-dir=.git "$pattern" . 2>/dev/null > /dev/null; then
+            HITS=$(grep -rnE --include="*.rs" --include="*.toml" --exclude-dir=target --exclude-dir=.git "$pattern" . 2>/dev/null || true)
+            if [ -n "$HITS" ]; then
               FOUND=1
+              # Show file:line only (never the matched content)
+              MATCHES="${MATCHES}$(printf "%s\n" "$HITS" | awk -F: '{print $1":"$2}')
+          "
             fi
           done
           if [ "$FOUND" -eq 1 ]; then
             echo "::error::Potential secrets detected in source files"
+            echo "**Files with potential secrets:**" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            printf "%s\n" "$MATCHES" | sort -u | head -20 >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
           echo "No secrets detected." >> $GITHUB_STEP_SUMMARY
@@ -54,10 +63,10 @@ jobs:
       - name: Check for unsafe blocks
         run: |
           echo "## Unsafe Block Audit" >> $GITHUB_STEP_SUMMARY
-          UNSAFE_COUNT=$(grep -rnE 'unsafe\s*\{' --include="*.rs" --exclude-dir=target --exclude-dir=.git . 2>/dev/null | wc -l || true)
+          UNSAFE_COUNT=$(grep -rnE 'unsafe\s*(fn|trait|impl|\{)' --include="*.rs" --exclude-dir=target --exclude-dir=.git . 2>/dev/null | wc -l || true)
           if [ "$UNSAFE_COUNT" -gt 0 ]; then
             echo "::warning::Found $UNSAFE_COUNT unsafe block(s) — verify each has a SAFETY comment"
-            grep -rnE 'unsafe\s*\{' --include="*.rs" --exclude-dir=target --exclude-dir=.git . 2>/dev/null || true
+            grep -rnE 'unsafe\s*(fn|trait|impl|\{)' --include="*.rs" --exclude-dir=target --exclude-dir=.git . 2>/dev/null || true
             echo "Found $UNSAFE_COUNT unsafe block(s). Verify each has a \`// SAFETY:\` justification." >> $GITHUB_STEP_SUMMARY
           else
             echo "No unsafe blocks found." >> $GITHUB_STEP_SUMMARY
