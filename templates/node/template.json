@@ -1,0 +1,38 @@
+{
+  "name": "node",
+  "description": "Node.js/TypeScript project foundation: npm/pnpm, ESLint, Vitest, Docker",
+  "layer": 1,
+  "extends": "base",
+  "detect": { "file_exists": "package.json" },
+  "markers": ["Project Name", "project-name", "package_name", "description", "date"],
+  "files": {
+    "managed": [
+      ".github/workflows/lint-node.yml",
+      ".github/workflows/typecheck-node.yml",
+      ".github/workflows/test-node.yml",
+      ".github/workflows/security-node.yml",
+      ".github/workflows/gemini-code-review.yml",
+      ".github/workflows/gemini-on-demand.yml",
+      ".github/workflows/stale.yml",
+      ".github/dependabot.yml"
+    ],
+    "seeded": [
+      "package.json",
+      "tsconfig.json",
+      "Dockerfile",
+      "Makefile",
+      "CLAUDE.md",
+      "AGENTS.md",
+      "GEMINI.md"
+    ]
+  },
+  "fragments": {
+    "CLAUDE.md": ["claude-commands", "claude-resources"],
+    "AGENTS.md": ["agents-tech-stack", "agents-file-structure", "agents-env-vars", "agents-commands"],
+    "GEMINI.md": ["gemini-quality-standards", "gemini-testing-standards"]
+  },
+  "scaffold": {
+    "directories": ["src", "tests"],
+    "files": {}
+  }
+}

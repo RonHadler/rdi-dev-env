@@ -1,0 +1,206 @@
+# Go Security Scan — govulncheck + secret detection + SAST
+# Copy to: .github/workflows/security-go.yml
+
+name: Security Scan
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  schedule:
+    - cron: '0 6 * * 1'  # Weekly Monday 6:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  GO_VERSION: '1.23'
+  BLOCK_ON_CRITICAL: 'false'
+
+jobs:
+  security-scan:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      # ── Tier 1: Dependency Vulnerabilities ──
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Dependency audit
+        id: deps
+        continue-on-error: true
+        run: |
+          echo "## Dependency Audit" > deps-report.md
+          TOTAL=0
+
+          VULN_OUTPUT=$(govulncheck ./... 2>&1 || true)
+
+          if echo "$VULN_OUTPUT" | grep -q "Vulnerability"; then
+            TOTAL=$(echo "$VULN_OUTPUT" | grep -c "Vulnerability" || true)
+            echo "**Found $TOTAL vulnerability(ies):**" >> deps-report.md
+            echo '```' >> deps-report.md
+            echo "$VULN_OUTPUT" | head -30 >> deps-report.md
+            echo '```' >> deps-report.md
+          else
+            echo "No known vulnerabilities found." >> deps-report.md
+          fi
+
+          echo "high_critical=$TOTAL" >> "$GITHUB_OUTPUT"
+          echo "total=$TOTAL" >> "$GITHUB_OUTPUT"
+
+      # ── Tier 2: Secret Detection ──
+      - name: Secret detection
+        id: secrets
+        run: |
+          echo "## Secret Detection" > secrets-report.md
+          FOUND=0
+
+          KEYS=$(grep -rnE \
+            '(sk-[a-zA-Z0-9]{20,}|AIza[a-zA-Z0-9_-]{35}|AKIA[A-Z0-9]{16}|ghp_[a-zA-Z0-9]{36})' \
+            --include='*.go' --include='*.yaml' --include='*.yml' \
+            --include='*.json' --include='*.toml' \
+            . 2>/dev/null \
+            | grep -v vendor | grep -v '_test\.go' \
+            | grep -v 'quality-gate' | grep -v 'ci\.yml' | grep -v 'security\.yml' \
+            || true)
+
+          if [ -n "$KEYS" ]; then
+            FOUND=$(echo "$KEYS" | wc -l)
+            echo "**CRITICAL: Possible hardcoded API keys found ($FOUND occurrences)**" >> secrets-report.md
+            echo '```' >> secrets-report.md
+            echo "$KEYS" | head -10 >> secrets-report.md
+            echo '```' >> secrets-report.md
+          else
+            echo "No hardcoded secrets detected." >> secrets-report.md
+          fi
+
+          echo "count=$FOUND" >> "$GITHUB_OUTPUT"
+
+      # ── Tier 3: SAST Patterns ──
+      - name: SAST pattern check
+        id: sast
+        run: |
+          echo "## SAST Patterns" > sast-report.md
+          FOUND=0
+
+          # unsafe package usage
+          UNSAFE=$(grep -rnE '\b"unsafe"\b' \
+            --include='*.go' \
+            . 2>/dev/null \
+            | grep -v vendor | grep -v '_test\.go' \
+            || true)
+
+          if [ -n "$UNSAFE" ]; then
+            COUNT=$(echo "$UNSAFE" | wc -l)
+            FOUND=$((FOUND + COUNT))
+            echo "**unsafe package usage ($COUNT occurrences):**" >> sast-report.md
+            echo '```' >> sast-report.md
+            echo "$UNSAFE" | head -5 >> sast-report.md
+            echo '```' >> sast-report.md
+          fi
+
+          # os/exec with potential user input
+          EXEC=$(grep -rnE 'exec\.Command\(' \
+            --include='*.go' \
+            . 2>/dev/null \
+            | grep -v vendor | grep -v '_test\.go' \
+            || true)
+
+          if [ -n "$EXEC" ]; then
+            COUNT=$(echo "$EXEC" | wc -l)
+            FOUND=$((FOUND + COUNT))
+            echo "**os/exec usage ($COUNT occurrences) — verify no user input:**" >> sast-report.md
+            echo '```' >> sast-report.md
+            echo "$EXEC" | head -5 >> sast-report.md
+            echo '```' >> sast-report.md
+          fi
+
+          # SQL string concatenation (potential injection)
+          SQLI=$(grep -rnE '(fmt\.Sprintf|"+.*\+).*([Ss][Ee][Ll][Ee][Cc][Tt]|[Ii][Nn][Ss][Ee][Rr][Tt]|[Uu][Pp][Dd][Aa][Tt][Ee]|[Dd][Ee][Ll][Ee][Tt][Ee])' \
+            --include='*.go' \
+            . 2>/dev/null \
+            | grep -v vendor | grep -v '_test\.go' \
+            || true)
+
+          if [ -n "$SQLI" ]; then
+            COUNT=$(echo "$SQLI" | wc -l)
+            FOUND=$((FOUND + COUNT))
+            echo "**Potential SQL injection ($COUNT occurrences):**" >> sast-report.md
+            echo '```' >> sast-report.md
+            echo "$SQLI" | head -5 >> sast-report.md
+            echo '```' >> sast-report.md
+          fi
+
+          if [ "$FOUND" -eq 0 ]; then
+            echo "No SAST patterns detected." >> sast-report.md
+          fi
+
+          echo "count=$FOUND" >> "$GITHUB_OUTPUT"
+
+      # ── Post Summary ──
+      - name: Post security report
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require('fs');
+
+            const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return 'Scan skipped.'; } };
+            const deps = read('deps-report.md');
+            const secrets = read('secrets-report.md');
+            const sast = read('sast-report.md');
+
+            const depsCount = '${{ steps.deps.outputs.high_critical }}' || '0';
+            const secretsCount = '${{ steps.secrets.outputs.count }}' || '0';
+            const sastCount = '${{ steps.sast.outputs.count }}' || '0';
+
+            const total = parseInt(depsCount) + parseInt(secretsCount) + parseInt(sastCount);
+            const status = total > 0 ? ':warning:' : ':white_check_mark:';
+
+            const body = [
+              `## ${status} Security Scan Summary`,
+              '',
+              '| Check | Findings |',
+              '|-------|----------|',
+              `| Dependencies (govulncheck) | ${depsCount} |`,
+              `| Hardcoded Secrets | ${secretsCount} |`,
+              `| SAST Patterns | ${sastCount} |`,
+              '',
+              '---',
+              '',
+              deps,
+              '',
+              secrets,
+              '',
+              sast,
+              '',
+              '---',
+              '*Powered by rdi-dev-env security scanner*'
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body
+            });
+
+      # ── Optional: Fail on critical ──
+      - name: Fail on critical findings
+        if: env.BLOCK_ON_CRITICAL == 'true'
+        run: |
+          SECRETS="${{ steps.secrets.outputs.count }}"
+          DEPS="${{ steps.deps.outputs.high_critical }}"
+
+          if [ "$SECRETS" -gt 0 ] || [ "$DEPS" -gt 0 ]; then
+            echo "::error::Critical security findings detected (secrets: $SECRETS, deps vulnerabilities: $DEPS)"
+            exit 1
+          fi

@@ -1,0 +1,5 @@
+- **Be specific:** Reference line numbers and exact issues
+- **Be actionable:** Suggest how to fix, don't just point out problems
+- **Be concise:** Focus on critical issues first
+- **Be constructive:** Explain *why* something is an issue
+- **Approve if good:** Don't nitpick - if code is solid, say so!

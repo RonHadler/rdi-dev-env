@@ -1,0 +1,81 @@
+name: Security Scan
+
+on:
+  pull_request:
+  schedule:
+    - cron: "0 8 * * 1"  # Weekly on Monday at 08:00 UTC
+
+permissions:
+  pull-requests: write
+
+jobs:
+  audit:
+    name: Dependency Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+
+      - name: Run cargo audit
+        run: cargo audit
+
+  secrets:
+    name: Secret Detection
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Scan for secrets
+        run: |
+          echo "## Secret Detection" >> $GITHUB_STEP_SUMMARY
+          FOUND=0
+          for pattern in "PRIVATE.KEY" "BEGIN RSA" "BEGIN DSA" "BEGIN EC" "password\s*=" "secret\s*=" "api_key\s*=" "token\s*="; do
+            if grep -rn --include="*.rs" --include="*.toml" "$pattern" . 2>/dev/null | grep -v target/ | grep -v ".git/"; then
+              FOUND=1
+            fi
+          done
+          if [ "$FOUND" -eq 1 ]; then
+            echo "::error::Potential secrets detected in source files"
+            exit 1
+          fi
+          echo "No secrets detected." >> $GITHUB_STEP_SUMMARY
+
+  unsafe-check:
+    name: Unsafe Block Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for unsafe blocks
+        run: |
+          echo "## Unsafe Block Audit" >> $GITHUB_STEP_SUMMARY
+          UNSAFE_COUNT=$(grep -rn "unsafe\s*{" --include="*.rs" . 2>/dev/null | grep -v target/ | grep -v ".git/" | wc -l)
+          if [ "$UNSAFE_COUNT" -gt 0 ]; then
+            echo "::warning::Found $UNSAFE_COUNT unsafe block(s) — verify each has a SAFETY comment"
+            grep -rn "unsafe\s*{" --include="*.rs" . 2>/dev/null | grep -v target/ | grep -v ".git/"
+            echo "Found $UNSAFE_COUNT unsafe block(s). Verify each has a \`// SAFETY:\` justification." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "No unsafe blocks found." >> $GITHUB_STEP_SUMMARY
+          fi
+
+  summary:
+    name: Post Summary
+    runs-on: ubuntu-latest
+    needs: [audit, secrets, unsafe-check]
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Post PR comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '## Security Scan Results\n\nAll security checks passed. See individual job logs for details.'
+            });

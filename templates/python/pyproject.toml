@@ -1,0 +1,49 @@
+[project]
+name = "<!-- CUSTOMIZE: project-name -->"
+version = "0.1.0"
+description = "<!-- CUSTOMIZE: description -->"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "httpx>=0.28",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "pytest-mock>=3.12",
+    "pytest-cov>=5.0",
+    "ruff>=0.9",
+    "mypy>=1.13",
+]
+
+[project.scripts]
+<!-- CUSTOMIZE: project-name --> = "<!-- CUSTOMIZE: package_name -->.server:main"
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["."]
+testpaths = ["tests"]
+markers = [
+    "smoke: tests against a deployed server (skipped when SMOKE_TEST_URL unset)",
+]
+
+[tool.uv]
+package = true
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"

@@ -1,0 +1,53 @@
+# <!-- CUSTOMIZE: Project Name --> - Claude Code Context
+
+> **Shared Context:** See [AGENTS.md](AGENTS.md) for project overview, architecture, security, and file structure.
+
+This file contains Claude Code-specific workflows and behaviors.
+
+---
+
+## Development Process — TDD is MANDATORY
+
+<!-- FRAGMENT: claude-dev-process -->
+
+---
+
+## Session Startup Checklist
+
+<!-- FRAGMENT: claude-session-startup -->
+
+---
+
+## Quick Commands
+
+<!-- FRAGMENT: claude-commands -->
+
+---
+
+## Documentation Workflow
+
+<!-- FRAGMENT: claude-doc-workflow -->
+
+---
+
+## Git Workflow
+
+<!-- FRAGMENT: claude-git-workflow -->
+
+---
+
+## Claude Code-Specific Behaviors
+
+<!-- FRAGMENT: claude-behaviors -->
+
+---
+
+## Contact & Resources
+
+<!-- FRAGMENT: claude-resources -->
+
+---
+
+<!-- CUSTOMIZE: Update date and version -->
+*Last Updated: <!-- CUSTOMIZE: date -->*
+*Version: 1.0*

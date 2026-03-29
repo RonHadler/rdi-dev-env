@@ -1,0 +1,58 @@
+# <!-- CUSTOMIZE: Project Name --> - Shared Agent Context
+
+> This file contains project context shared across all AI coding agents (Claude, Gemini, Cursor, etc.).
+> Agent-specific instructions are in their respective files: [CLAUDE.md](CLAUDE.md), [GEMINI.md](GEMINI.md)
+
+---
+
+## Project Overview
+
+<!-- FRAGMENT: agents-overview -->
+
+---
+
+## Technology Stack
+
+<!-- FRAGMENT: agents-tech-stack -->
+
+---
+
+## Architecture Overview
+
+<!-- FRAGMENT: agents-architecture -->
+
+---
+
+## File Structure
+
+<!-- FRAGMENT: agents-file-structure -->
+
+---
+
+## Security Standards
+
+<!-- FRAGMENT: agents-security -->
+
+---
+
+## Environment Variables
+
+<!-- FRAGMENT: agents-env-vars -->
+
+---
+
+## Quick Commands
+
+<!-- FRAGMENT: agents-commands -->
+
+---
+
+## Development Environment (tmux)
+
+<!-- FRAGMENT: agents-dev-environment -->
+
+---
+
+<!-- CUSTOMIZE: Update date and version -->
+*Last Updated: <!-- CUSTOMIZE: date -->*
+*Version: 1.0*

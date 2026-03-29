@@ -1,0 +1,7 @@
+- **Strict TypeScript** — `strict: true` in tsconfig, no suppression comments without justification
+- **No `any`** — Every `any` must have an inline comment explaining why it cannot be typed
+- **ESLint clean** — Zero warnings, zero errors
+- **Function length** — Max 50 lines per function; extract helpers if longer
+- **Coverage** — Maintain > 80% line coverage on all new code
+- **All exports typed** — Every exported function, class, and constant must have explicit type annotations
+- **No unused imports** — Remove all dead imports before merging

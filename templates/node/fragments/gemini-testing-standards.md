@@ -1,0 +1,7 @@
+- **Framework** — Vitest (compatible with Jest API)
+- **Test location** — Co-located `*.test.ts` files or `tests/` directory
+- **Coverage threshold** — > 80% line coverage enforced in CI
+- **Mock external dependencies** — Use `vi.mock()` for network calls, file I/O, and third-party services
+- **Descriptive test names** — `it("should return 404 when user not found")` not `it("test1")`
+- **Arrange-Act-Assert** — Every test follows the AAA pattern
+- **No test interdependence** — Each test must run in isolation

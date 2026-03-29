@@ -1,0 +1,20 @@
+# Dependabot Configuration — Base
+# Copy to: .github/dependabot.yml (NOT .github/workflows/)
+#
+# Base template: GitHub Actions updates only.
+# Language-specific ecosystems are added by language templates.
+
+version: 2
+
+updates:
+  # ── GitHub Actions ──
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "ci"

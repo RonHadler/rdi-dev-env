@@ -1,0 +1,37 @@
+{
+  "name": "go",
+  "description": "Go project foundation: go modules, golangci-lint, Docker",
+  "layer": 1,
+  "extends": "base",
+  "detect": { "file_exists": "go.mod" },
+  "markers": ["Project Name", "project-name", "package_name", "description", "date"],
+  "files": {
+    "managed": [
+      ".github/workflows/lint-go.yml",
+      ".github/workflows/typecheck-go.yml",
+      ".github/workflows/test-go.yml",
+      ".github/workflows/security-go.yml",
+      ".github/workflows/gemini-code-review.yml",
+      ".github/workflows/gemini-on-demand.yml",
+      ".github/workflows/stale.yml",
+      ".github/dependabot.yml"
+    ],
+    "seeded": [
+      "go.mod",
+      "Dockerfile",
+      "Makefile",
+      "CLAUDE.md",
+      "AGENTS.md",
+      "GEMINI.md"
+    ]
+  },
+  "fragments": {
+    "CLAUDE.md": ["claude-commands", "claude-resources"],
+    "AGENTS.md": ["agents-tech-stack", "agents-file-structure", "agents-env-vars", "agents-commands"],
+    "GEMINI.md": ["gemini-quality-standards", "gemini-testing-standards"]
+  },
+  "scaffold": {
+    "directories": ["cmd", "internal", "pkg"],
+    "files": {}
+  }
+}

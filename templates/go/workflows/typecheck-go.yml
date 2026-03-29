@@ -1,0 +1,43 @@
+# Go Type Check — go vet
+# Copy to: .github/workflows/typecheck-go.yml
+
+name: Type Check
+
+on:
+  pull_request:
+    branches: ["<!-- CUSTOMIZE: default_branch -->"]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.gitignore'
+  push:
+    branches: ["<!-- CUSTOMIZE: default_branch -->"]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: typecheck-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: '1.23'
+
+jobs:
+  vet:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Run go vet
+        run: go vet ./...

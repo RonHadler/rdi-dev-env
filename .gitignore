@@ -18,5 +18,8 @@ Desktop.ini
 tmp/
 temp/
 
+# Vision docs -- junction to rdi-elevateai-vision/docs/DevEnvironment (source of truth)
+docs/vision/
+
 # Node (if any scripts use it)
 node_modules/

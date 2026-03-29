@@ -1,0 +1,24 @@
+# Dependabot — Python (pip/uv) ecosystem
+# This content should be MERGED into .github/dependabot.yml alongside the base template.
+#
+# Add this block to the base dependabot.yml 'updates' list:
+
+# - package-ecosystem: "pip"
+#   directory: "/"
+#   schedule:
+#     interval: "weekly"
+#     day: "monday"
+#   groups:
+#     minor-and-patch:
+#       update-types:
+#         - "minor"
+#         - "patch"
+#   open-pull-requests-limit: 10
+#   labels:
+#     - "dependencies"
+#   commit-message:
+#     prefix: "deps"
+#     include: "scope"
+
+# NOTE: This file is a reference snippet. The scaffolding script merges
+# this into the base dependabot.yml automatically during project creation.

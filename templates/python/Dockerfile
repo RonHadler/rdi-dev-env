@@ -9,7 +9,6 @@ ENV PYTHONUNBUFFERED=1
 # Install dependencies first (cached unless pyproject.toml/uv.lock change)
 COPY pyproject.toml uv.lock* /app/
 RUN uv sync --frozen --no-dev --no-install-project
-# Note: --frozen ensures uv uses the committed uv.lock exactly, never resolving against PyPI
 
 # Copy full source and install project
 COPY . /app
@@ -21,4 +20,4 @@ USER appuser
 
 EXPOSE ${PORT:-8000}
 
-CMD ["uv", "run", "--no-sync", "python", "-m", "<!-- CUSTOMIZE: package_name -->.server"]
+CMD ["uv", "run", "--no-sync", "python", "-m", "<!-- CUSTOMIZE: package_name -->"]

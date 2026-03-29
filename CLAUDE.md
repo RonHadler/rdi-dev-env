@@ -18,6 +18,17 @@ Development environment, templates, and tooling for RDI's Python/FastMCP MCP ser
 | `rdi-refresh <path> --apply --tasks` | Deploy managed files + generate tasks |
 | `rdi-new-project` | Scaffold a new project from templates |
 
+## Vision Docs
+
+**Vision docs** live in `rdi-elevateai-vision` (single source of truth). A local NTFS junction
+at `docs/vision/` points to `C:\Dev\rdi-elevateai-vision\docs\DevEnvironment\`.
+If the junction is missing, recreate it:
+
+    cmd /c "mklink /J C:\Dev\rdi-dev-env\docs\vision C:\Dev\rdi-elevateai-vision\docs\DevEnvironment"
+
+Key docs available via the junction:
+- `docs/vision/dev-environment-vision-strategy.md` — WSL2 migration, container isolation, tooling strategy
+
 ## Conventions
 
 - **Conventional commits:** `feat:`, `fix:`, `test:`, `docs:`, `deps:`, `ci:`
