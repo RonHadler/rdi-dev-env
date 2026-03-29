@@ -70,7 +70,7 @@ jobs:
           FOUND=0
 
           KEYS=$(grep -rnE \
-            '(sk-[a-zA-Z0-9]{20,}|AIza[a-zA-Z0-9_-]{35}|AKIA[A-Z0-9]{16}|ghp_[a-zA-Z0-9]{36})' \
+            '(sk-[a-zA-Z0-9_-]{20,}|AIza[a-zA-Z0-9_-]{35}|AKIA[A-Z0-9]{16}|ghp_[a-zA-Z0-9]{36})' \
             --include='*.rs' --include='*.toml' --include='*.yaml' --include='*.yml' \
             --exclude-dir=target --exclude-dir=.git --exclude-dir=tests \
             . 2>/dev/null || true)

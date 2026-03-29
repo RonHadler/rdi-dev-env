@@ -43,13 +43,7 @@ fi
 # Source shared template utilities
 source "$SCRIPT_DIR/lib/template-utils.sh"
 
-# ── Dependencies check ──────────────────────────────────────
-# Python is required (provided by template-utils.sh as $PYTHON_CMD)
-# Node is optional (used by dashboard JSON parsing if available)
-JSON_TOOL="python"
-if command -v jq &>/dev/null; then
-  JSON_TOOL="jq"
-fi
+# Python is required (validated by template-utils.sh at source time)
 
 # ── JSON helpers ─────────────────────────────────────────────
 # Pre-parsed check arrays (populated by load_standards)
@@ -239,7 +233,8 @@ run_check() {
         find_pattern=$(basename "$check_path")
         local find_args=("$project_dir" -path "*/.venv" -prune -o -path "*/.git" -prune -o -path "*/node_modules" -prune -o -path "*/target" -prune)
 
-        # Handle brace expansion: *.{py,go,rs} → multiple -name args
+        # Handle single brace expansion group: *.{py,go,rs} → multiple -name args
+        # Only supports one brace group per pattern (no nested or multiple groups)
         if [[ "$find_pattern" == *"{"*"}"* ]]; then
           local prefix="${find_pattern%%\{*}"
           local remainder="${find_pattern#*\{}"
@@ -449,7 +444,10 @@ audit_project() {
   fi
 
   # Resolve template chain for detected stack
-  resolve_chain "$detected"
+  if ! resolve_chain "$detected"; then
+    echo -e "${RED}Error:${NC} Failed to resolve template chain for '$detected'" >&2
+    return 1
+  fi
   local chain_str="${TEMPLATE_CHAIN[*]}"
 
   local check_count=$STD_COUNT

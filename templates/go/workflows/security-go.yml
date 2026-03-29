@@ -65,7 +65,7 @@ jobs:
           FOUND=0
 
           KEYS=$(grep -rnE \
-            '(sk-[a-zA-Z0-9]{20,}|AIza[a-zA-Z0-9_-]{35}|AKIA[A-Z0-9]{16}|ghp_[a-zA-Z0-9]{36})' \
+            '(sk-[a-zA-Z0-9_-]{20,}|AIza[a-zA-Z0-9_-]{35}|AKIA[A-Z0-9]{16}|ghp_[a-zA-Z0-9]{36})' \
             --include='*.go' --include='*.yaml' --include='*.yml' \
             --include='*.json' --include='*.toml' \
             --exclude-dir=vendor --exclude-dir=.git --exclude-dir=testdata \

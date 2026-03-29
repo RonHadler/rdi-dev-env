@@ -35,6 +35,7 @@ if [ -z "$PYTHON_CMD" ]; then
 fi
 
 # ── Globals set by functions ─────────────────────────────────
+# shellcheck disable=SC2034  # These globals are consumed by scripts that source this file
 TEMPLATE_CHAIN=()       # Set by resolve_chain()
 DETECTED_STACK=""       # Set by detect_stack()
 MANAGED_FILES=()        # Set by collect_managed_files()
@@ -42,6 +43,7 @@ SEEDED_MAP_KEYS=()      # Set by collect_seeded_files()
 SEEDED_MAP_VALUES=()    # Set by collect_seeded_files()
 
 # Metadata set by extract_metadata()
+# shellcheck disable=SC2034
 META_PROJECT_NAME=""
 META_DESCRIPTION=""
 META_PACKAGE_NAME=""
