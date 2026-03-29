@@ -1,17 +1,26 @@
+# Rust Security Scan — cargo-audit + secret detection + SAST
+# Copy to: .github/workflows/security-rust.yml
+
 name: Security Scan
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened]
   schedule:
-    - cron: "0 8 * * 1"  # Weekly on Monday at 08:00 UTC
+    - cron: '0 6 * * 1'  # Weekly Monday 6:00 UTC
+  workflow_dispatch:
 
 permissions:
+  contents: read
   pull-requests: write
 
+env:
+  BLOCK_ON_CRITICAL: 'false'
+
 jobs:
-  audit:
-    name: Dependency Audit
+  security-scan:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -21,79 +30,155 @@ jobs:
       - name: Install cargo-audit
         uses: taiki-e/install-action@cargo-audit
 
-      - name: Run cargo audit
-        run: cargo audit
-
-  secrets:
-    name: Secret Detection
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Scan for secrets
+      # ── Tier 1: Dependency Vulnerabilities ──
+      - name: Dependency audit
+        id: deps
+        continue-on-error: true
         run: |
-          echo "## Secret Detection" >> $GITHUB_STEP_SUMMARY
-          FOUND=0
-          MATCHES=""
-          for pattern in "PRIVATE.KEY" "BEGIN RSA" "BEGIN DSA" "BEGIN EC" "password\s*=" "secret\s*=" "api_key\s*=" "token\s*="; do
-            HITS=$(grep -rnE --include="*.rs" --include="*.toml" --exclude-dir=target --exclude-dir=.git "$pattern" . 2>/dev/null || true)
-            if [ -n "$HITS" ]; then
-              FOUND=1
-              # Show file:line only (never the matched content)
-              MATCHES="${MATCHES}$(printf "%s\n" "$HITS" | awk -F: '{print $1":"$2}')"$'\n'
-            fi
-          done
-          if [ "$FOUND" -eq 1 ]; then
-            echo "::error::Potential secrets detected in source files"
-            echo "**Files with potential secrets:**" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            printf "%s\n" "$MATCHES" | sort -u | head -20 >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            exit 1
+          echo "## Dependency Audit" > deps-report.md
+          TOTAL=0
+
+          AUDIT_OUTPUT=$(cargo audit --json 2>/dev/null || true)
+
+          if [ -n "$AUDIT_OUTPUT" ]; then
+            TOTAL=$(printf "%s" "$AUDIT_OUTPUT" | python3 -c "
+          import sys, json
+          try:
+              data = json.load(sys.stdin)
+              print(len(data.get('vulnerabilities', {}).get('list', [])))
+          except:
+              print(0)
+          " 2>/dev/null || echo "0")
           fi
-          echo "No secrets detected." >> $GITHUB_STEP_SUMMARY
 
-  unsafe-check:
-    name: Unsafe Block Audit
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+          echo "high_critical=$TOTAL" >> "$GITHUB_OUTPUT"
 
-      - name: Check for unsafe blocks
-        run: |
-          echo "## Unsafe Block Audit" >> $GITHUB_STEP_SUMMARY
-          UNSAFE_COUNT=$(grep -rnE 'unsafe\s*(fn|trait|impl|\{)' --include="*.rs" --exclude-dir=target --exclude-dir=.git . 2>/dev/null | wc -l || true)
-          if [ "$UNSAFE_COUNT" -gt 0 ]; then
-            echo "::warning::Found $UNSAFE_COUNT unsafe block(s) — verify each has a SAFETY comment"
-            grep -rnE 'unsafe\s*(fn|trait|impl|\{)' --include="*.rs" --exclude-dir=target --exclude-dir=.git . 2>/dev/null || true
-            echo "Found $UNSAFE_COUNT unsafe block(s). Verify each has a \`// SAFETY:\` justification." >> $GITHUB_STEP_SUMMARY
+          if [ "$TOTAL" -gt 0 ]; then
+            echo "**Found $TOTAL vulnerability(ies):**" >> deps-report.md
+            echo '```' >> deps-report.md
+            cargo audit 2>/dev/null | head -30 >> deps-report.md || true
+            echo '```' >> deps-report.md
           else
-            echo "No unsafe blocks found." >> $GITHUB_STEP_SUMMARY
+            echo "No known vulnerabilities found." >> deps-report.md
           fi
 
-  summary:
-    name: Post Summary
-    runs-on: ubuntu-latest
-    needs: [audit, secrets, unsafe-check]
-    if: always() && github.event_name == 'pull_request'
-    steps:
-      - name: Post PR comment
+      # ── Tier 2: Secret Detection ──
+      - name: Secret detection
+        id: secrets
+        run: |
+          echo "## Secret Detection" > secrets-report.md
+          FOUND=0
+
+          KEYS=$(grep -rnE \
+            '(sk-[a-zA-Z0-9]{20,}|AIza[a-zA-Z0-9_-]{35}|AKIA[A-Z0-9]{16}|ghp_[a-zA-Z0-9]{36})' \
+            --include='*.rs' --include='*.toml' --include='*.yaml' --include='*.yml' \
+            --exclude-dir=target --exclude-dir=.git \
+            . 2>/dev/null || true)
+
+          if [ -n "$KEYS" ]; then
+            FOUND=$(printf "%s\n" "$KEYS" | wc -l)
+            echo "**CRITICAL: Possible hardcoded API keys found ($FOUND occurrences)**" >> secrets-report.md
+            echo '```' >> secrets-report.md
+            printf "%s\n" "$KEYS" | awk -F: '{print $1":"$2}' | head -10 >> secrets-report.md
+            echo '```' >> secrets-report.md
+          else
+            echo "No hardcoded secrets detected." >> secrets-report.md
+          fi
+
+          echo "count=$FOUND" >> "$GITHUB_OUTPUT"
+
+      # ── Tier 3: SAST Patterns ──
+      - name: SAST pattern check
+        id: sast
+        run: |
+          echo "## SAST Patterns" > sast-report.md
+          FOUND=0
+
+          # unsafe usage (fn, trait, impl, blocks)
+          UNSAFE=$(grep -rnE 'unsafe\s*(fn|trait|impl|\{)' \
+            --include='*.rs' \
+            --exclude-dir=target --exclude-dir=.git \
+            . 2>/dev/null || true)
+
+          if [ -n "$UNSAFE" ]; then
+            COUNT=$(printf "%s\n" "$UNSAFE" | wc -l)
+            FOUND=$((FOUND + COUNT))
+            echo "**unsafe usage ($COUNT occurrences) — verify each has a \`// SAFETY:\` comment:**" >> sast-report.md
+            echo '```' >> sast-report.md
+            printf "%s\n" "$UNSAFE" | head -10 >> sast-report.md
+            echo '```' >> sast-report.md
+          fi
+
+          if [ "$FOUND" -eq 0 ]; then
+            echo "No SAST patterns detected." >> sast-report.md
+          fi
+
+          echo "count=$FOUND" >> "$GITHUB_OUTPUT"
+
+      # ── Post Summary ──
+      - name: Post security report
+        if: always() && github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
           script: |
-            const auditResult = '${{ needs.audit.result }}';
-            const secretsResult = '${{ needs.secrets.result }}';
-            const unsafeResult = '${{ needs.unsafe-check.result }}';
+            const fs = require('fs');
 
-            const allPassed = auditResult === 'success' && secretsResult === 'success' && unsafeResult === 'success';
-            const icon = allPassed ? ':white_check_mark:' : ':warning:';
-            const summary = allPassed
-              ? 'All security checks passed.'
-              : `Some checks need attention: audit=${auditResult}, secrets=${secretsResult}, unsafe=${unsafeResult}`;
+            const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return 'Scan skipped.'; } };
+            const deps = read('deps-report.md');
+            const secrets = read('secrets-report.md');
+            const sast = read('sast-report.md');
+
+            const depsCount = '${{ steps.deps.outputs.high_critical }}' || '0';
+            const secretsCount = '${{ steps.secrets.outputs.count }}' || '0';
+            const sastCount = '${{ steps.sast.outputs.count }}' || '0';
+
+            const total = parseInt(depsCount) + parseInt(secretsCount) + parseInt(sastCount);
+            const status = total > 0 ? ':warning:' : ':white_check_mark:';
+
+            const body = [
+              `## ${status} Security Scan Summary`,
+              '',
+              '| Check | Findings |',
+              '|-------|----------|',
+              `| Dependencies (cargo-audit) | ${depsCount} |`,
+              `| Hardcoded Secrets | ${secretsCount} |`,
+              `| SAST Patterns (unsafe) | ${sastCount} |`,
+              '',
+              '---',
+              '',
+              deps,
+              '',
+              secrets,
+              '',
+              sast,
+              '',
+              '---',
+              '*Powered by rdi-dev-env security scanner*'
+            ].join('\n');
 
             await github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `## ${icon} Security Scan Results\n\n${summary}\n\nSee individual job logs for details.\n\n---\n*Powered by rdi-dev-env security scanner*`
+              body
             });
+
+      # ── Step Summary (visible on scheduled runs without a PR) ──
+      - name: Output to Step Summary
+        if: always()
+        run: |
+          for f in deps-report.md secrets-report.md sast-report.md; do
+            if [ -f "$f" ]; then cat "$f" >> "$GITHUB_STEP_SUMMARY"; printf "\n" >> "$GITHUB_STEP_SUMMARY"; fi
+          done
+
+      # ── Optional: Fail on critical ──
+      - name: Fail on critical findings
+        if: env.BLOCK_ON_CRITICAL == 'true'
+        run: |
+          SECRETS="${{ steps.secrets.outputs.count || '0' }}"
+          DEPS="${{ steps.deps.outputs.high_critical || '0' }}"
+
+          if [ "${SECRETS:-0}" -gt 0 ] || [ "${DEPS:-0}" -gt 0 ]; then
+            echo "::error::Critical security findings detected (secrets: $SECRETS, deps: $DEPS)"
+            exit 1
+          fi

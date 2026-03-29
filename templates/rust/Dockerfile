@@ -22,10 +22,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder --chown=appuser:appuser /app/target/release/<!-- CUSTOMIZE: project-name --> /usr/local/bin/server
-
 # Non-root user
 RUN useradd --create-home --shell /bin/bash appuser
+
+COPY --from=builder --chown=appuser:appuser /app/target/release/<!-- CUSTOMIZE: project-name --> /usr/local/bin/server
+
 USER appuser
 
 EXPOSE ${PORT:-8000}

@@ -25,6 +25,9 @@ concurrency:
   group: test-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  COVERAGE_THRESHOLD: 80
+
 jobs:
   test:
     name: Test Suite
@@ -55,7 +58,7 @@ jobs:
         uses: taiki-e/install-action@cargo-tarpaulin
 
       - name: Generate coverage
-        run: cargo tarpaulin --out xml --fail-under 80
+        run: cargo tarpaulin --out xml --fail-under ${{ env.COVERAGE_THRESHOLD }}
 
       - name: Upload coverage artifact
         if: always()
