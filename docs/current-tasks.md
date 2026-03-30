@@ -11,6 +11,7 @@ Phase 1 complete. Phase 2 next (high-risk production: rdi-google-ads-mcp, rdi-go
 - [ ] Standardize `.template` suffix on `pyproject.toml` (align with Cargo.toml.template, package.json.template, go.mod.template)
 - [ ] Configure Python dependabot to use `uv` ecosystem (or add `uv lock` step for Dependabot PRs)
 - [ ] Replace Go SQL injection hand-rolled regex with `gosec` in security-go.yml
+- [ ] Align `collect_managed_files` / `collect_seeded_files` to same data structure convention
 
 ## Up Next — Phase 2 Rollout
 - [ ] Run `rdi-refresh --apply --tasks` on rdi-google-ads-mcp
