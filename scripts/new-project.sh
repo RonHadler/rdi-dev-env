@@ -161,6 +161,7 @@ build_stack_menu() {
   sorted=$(printf '%s\n' "${entries[@]}" | sort -t$'\t' -k1n -k2)
 
   while IFS=$'\t' read -r _layer name desc; do
+    [ -z "$name" ] && continue
     STACK_NAMES+=("$name")
     STACK_LABELS+=("$name — $desc")
   done <<< "$sorted"
@@ -211,10 +212,12 @@ main() {
   echo ""
 
   # ── Set META_* globals from user input ─────────────────────
+  # shellcheck disable=SC2034  # META_* consumed by substitute_markers() in template-utils.sh
   META_PROJECT_NAME="$project_name"
   META_PACKAGE_NAME=$(echo "$project_name" | sed 's/[- ]/_/g')
   META_DISPLAY_NAME=$($PYTHON_CMD -c "import sys; print(sys.argv[1].replace('-', ' ').title())" "$project_name" 2>/dev/null) || true
   META_DISPLAY_NAME="${META_DISPLAY_NAME//$'\r'/}"
+  # shellcheck disable=SC2034  # Consumed by substitute_markers()
   META_DEFAULT_BRANCH="develop"
 
   # ── 3. Description ─────────────────────────────────────────
@@ -657,8 +660,11 @@ COMMITMSG
   # ── GitHub Remote ──────────────────────────────────────────
   if [ "$create_remote" = true ] && command -v gh &>/dev/null; then
     echo -e "${BOLD}Creating GitHub remote...${NC}"
-    gh repo create "$github_remote" --private --source=. --push 2>&1 | tail -3
-    echo -e "  ${GREEN}+${NC} GitHub remote created"
+    if gh repo create "$github_remote" --private --source=. --push 2>&1 | tail -3; then
+      echo -e "  ${GREEN}+${NC} GitHub remote created"
+    else
+      echo -e "  ${YELLOW}~${NC} GitHub remote creation failed — run manually"
+    fi
     echo ""
   fi
 
