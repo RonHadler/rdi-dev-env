@@ -231,14 +231,15 @@ detect_stack() {
 collect_managed_files() {
   local _keys=()
   local _values=()
+  local tjson found keys_len
 
   for stack in "${TEMPLATE_CHAIN[@]}"; do
-    local tjson="$TEMPLATES_DIR/$stack/template.json"
+    tjson="$TEMPLATES_DIR/$stack/template.json"
     while IFS= read -r entry; do
       [ -z "$entry" ] && continue
       # Dedup: later layers override earlier for same dest path
-      local found=false
-      local keys_len=${#_keys[@]}
+      found=false
+      keys_len=${#_keys[@]}
       for ((i=0; i<keys_len; i++)); do
         if [ "${_keys[$i]}" = "$entry" ]; then
           _values[$i]="$stack"
@@ -269,14 +270,15 @@ collect_managed_files() {
 collect_seeded_files() {
   SEEDED_MAP_KEYS=()
   SEEDED_MAP_VALUES=()
+  local tjson found keys_len
 
   for stack in "${TEMPLATE_CHAIN[@]}"; do
-    local tjson="$TEMPLATES_DIR/$stack/template.json"
+    tjson="$TEMPLATES_DIR/$stack/template.json"
     while IFS= read -r entry; do
       [ -z "$entry" ] && continue
       # Check if key already exists; if so, override its value
-      local found=false
-      local keys_len=${#SEEDED_MAP_KEYS[@]}
+      found=false
+      keys_len=${#SEEDED_MAP_KEYS[@]}
       for ((i=0; i<keys_len; i++)); do
         if [ "${SEEDED_MAP_KEYS[$i]}" = "$entry" ]; then
           SEEDED_MAP_VALUES[$i]="$stack"
