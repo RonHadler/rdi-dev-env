@@ -38,9 +38,8 @@ fi
 # shellcheck disable=SC2034  # These globals are consumed by scripts that source this file
 TEMPLATE_CHAIN=()       # Set by resolve_chain()
 DETECTED_STACK=""       # Set by detect_stack()
-MANAGED_FILES=()        # Set by collect_managed_files()
-SEEDED_MAP_KEYS=()      # Set by collect_seeded_files()
-SEEDED_MAP_VALUES=()    # Set by collect_seeded_files()
+MANAGED_FILES=()        # Set by collect_managed_files()  — "stack:dest" entries
+SEEDED_FILES=()         # Set by collect_seeded_files()   — "stack:dest" entries
 
 # Metadata set by extract_metadata()
 # shellcheck disable=SC2034
@@ -262,35 +261,43 @@ collect_managed_files() {
   done
 }
 
-# Collect seeded files from the template chain.
-# Later layers override earlier ones for same-named files.
-# Uses parallel arrays instead of associative arrays for bash 3 compat.
-# Sets SEEDED_MAP_KEYS and SEEDED_MAP_VALUES arrays.
+# Collect seeded files from the template chain, deduplicated by dest path.
+# Later layers override earlier ones (e.g. python-fastmcp overrides python for same file).
+# Each entry is "stack_name:dest_path", matching MANAGED_FILES format.
+# Requires TEMPLATE_CHAIN to be set (call resolve_chain first).
+# Sets SEEDED_FILES array.
 # Usage: collect_seeded_files
 collect_seeded_files() {
-  SEEDED_MAP_KEYS=()
-  SEEDED_MAP_VALUES=()
+  local _keys=()
+  local _values=()
   local tjson found keys_len
 
   for stack in "${TEMPLATE_CHAIN[@]}"; do
     tjson="$TEMPLATES_DIR/$stack/template.json"
     while IFS= read -r entry; do
       [ -z "$entry" ] && continue
-      # Check if key already exists; if so, override its value
+      # Dedup: later layers override earlier for same dest path
       found=false
-      keys_len=${#SEEDED_MAP_KEYS[@]}
+      keys_len=${#_keys[@]}
       for ((i=0; i<keys_len; i++)); do
-        if [ "${SEEDED_MAP_KEYS[$i]}" = "$entry" ]; then
-          SEEDED_MAP_VALUES[$i]="$stack"
+        if [ "${_keys[$i]}" = "$entry" ]; then
+          _values[$i]="$stack"
           found=true
           break
         fi
       done
       if [ "$found" = false ]; then
-        SEEDED_MAP_KEYS+=("$entry")
-        SEEDED_MAP_VALUES+=("$stack")
+        _keys+=("$entry")
+        _values+=("$stack")
       fi
     done < <(json_extract_array "$tjson" "files.seeded")
+  done
+
+  # Build final SEEDED_FILES array
+  SEEDED_FILES=()
+  local len=${#_keys[@]}
+  for ((i=0; i<len; i++)); do
+    SEEDED_FILES+=("${_values[$i]}:${_keys[$i]}")
   done
 }
 

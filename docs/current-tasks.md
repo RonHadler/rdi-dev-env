@@ -7,10 +7,7 @@ Phase 1 complete. Phase 2 next (high-risk production: rdi-google-ads-mcp, rdi-go
 - None
 
 ## Up Next — Script Updates
-- [ ] Standardize `.template` suffix on `pyproject.toml` (align with Cargo.toml.template, package.json.template, go.mod.template)
-- [ ] Configure Python dependabot to use `uv` ecosystem (or add `uv lock` step for Dependabot PRs)
-- [ ] Replace Go SQL injection hand-rolled regex with `gosec` in security-go.yml
-- [ ] Align `collect_managed_files` / `collect_seeded_files` to same data structure convention
+- (all complete — see Completed section)
 
 ## Up Next — Phase 2 Rollout
 - [ ] Run `rdi-refresh --apply --tasks` on rdi-google-ads-mcp
@@ -31,6 +28,10 @@ Phase 1 complete. Phase 2 next (high-risk production: rdi-google-ads-mcp, rdi-go
 - [x] Update `audit-project.sh`: auto-detect stack from manifest files, multi-stack check collection
 - [x] Update `refresh-project.sh`: manifest-driven managed file lists, polymorphic metadata extraction
 - [x] Update `new-project.sh`: resolve_chain(), assemble_file(), stack menu, lockfile generation
+- [x] Standardize `.template` suffix on `pyproject.toml`
+- [x] Configure Python dependabot for `uv` (no-op: `pip` ecosystem already handles `uv.lock`)
+- [x] Replace Go SQL injection regex with `gosec` in security-go.yml
+- [x] Align `collect_managed_files` / `collect_seeded_files` to same data structure convention
 
 ## Blocked
 - None
