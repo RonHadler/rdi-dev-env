@@ -3,16 +3,19 @@
 # rdi-dev-env — Smart Project Scaffolder
 #
 # Interactive script to create new projects from templates.
-# Currently supports: Python/FastMCP
-# Future: Next.js, Go
+# Supports all stacks defined in templates/*/template.json:
+#   python, python-fastmcp, go, node, rust
+#
+# File lists, directories, and inheritance are driven by template.json
+# definitions — the same source of truth used by rdi-refresh and rdi-audit.
 #
 # Usage:
 #   new-project.sh
 #
-# Dependencies: git, uv (for Python), sed, jq
+# Dependencies: git, python3 (or python), stack-specific tools (uv, npm, go, cargo)
 #
 
-set -uo pipefail
+set -euo pipefail
 
 # ── Colors ───────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -26,7 +29,13 @@ NC='\033[0m'
 # ── Paths ────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEV_ENV_DIR="$(dirname "$SCRIPT_DIR")"
+# shellcheck disable=SC2034  # Used by sourced template-utils.sh
 TEMPLATES_DIR="$DEV_ENV_DIR/templates"
+
+# Source shared template utilities (provides resolve_chain, detect_stack,
+# collect_managed_files, collect_seeded_files, assemble_file, copy_gitignore,
+# substitute_markers, resolve_workflow_source, json_extract_*, PYTHON_CMD)
+source "$SCRIPT_DIR/lib/template-utils.sh"
 
 # ── Helpers ──────────────────────────────────────────────────
 prompt_text() {
@@ -71,291 +80,383 @@ prompt_yn() {
   [[ "$answer" =~ ^[Yy] ]]
 }
 
-to_snake_case() {
-  echo "$1" | sed 's/[- ]/_/g'
-}
-
-to_upper_snake_case() {
-  echo "$1" | sed 's/[- ]/_/g' | tr '[:lower:]' '[:upper:]'
-}
-
 # ── Dependency Check ─────────────────────────────────────────
 check_deps() {
-  local missing=()
-  for cmd in git sed; do
-    if ! command -v "$cmd" &>/dev/null; then
-      missing+=("$cmd")
-    fi
-  done
-  if [ ${#missing[@]} -gt 0 ]; then
-    echo -e "${RED}Missing required dependencies: ${missing[*]}${NC}"
+  if ! command -v git &>/dev/null; then
+    echo -e "${RED}Missing required dependency: git${NC}"
     exit 1
   fi
 }
 
-# ── Template Substitution ────────────────────────────────────
-substitute_markers() {
-  local file="$1"
+# ── Stack Helpers ────────────────────────────────────────────
 
-  # Skip binary files
-  if file "$file" | grep -q "binary"; then
-    return
+# Check if the template chain includes a Python stack.
+is_python_stack() {
+  for s in "${TEMPLATE_CHAIN[@]}"; do
+    [ "$s" = "python" ] && return 0
+  done
+  return 1
+}
+
+# Check if a scaffold entry is a known project-root directory.
+is_project_root_entry() {
+  case "$1" in
+    tests|tests/*|docs|docs/*|.github|.github/*|scripts|scripts/*|bin|bin/*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Resolve scaffold destination path.
+# For Python stacks, bare names (not project-root dirs) go into the package dir.
+resolve_scaffold_dest() {
+  local entry="$1" target="$2"
+  if is_python_stack && ! is_project_root_entry "$entry"; then
+    echo "$target/$META_PACKAGE_NAME/$entry"
+  else
+    echo "$target/$entry"
   fi
+}
 
-  # Escape | (sed delimiter) and & (sed special char) in user inputs
-  local safe_desc="${PROJECT_DESCRIPTION//|/\\|}"
-  safe_desc="${safe_desc//&/\\&}"
-  local safe_display="${PROJECT_DISPLAY_NAME//|/\\|}"
-  safe_display="${safe_display//&/\\&}"
-  local safe_name="${PROJECT_NAME//|/\\|}"
-  local safe_pkg="${PACKAGE_NAME//|/\\|}"
-  local safe_upper_pkg="${UPPER_PACKAGE_NAME//|/\\|}"
-  local safe_gcp_project="${GCP_PROJECT_ID//|/\\|}"
-  local safe_gcp_region="${GCP_REGION//|/\\|}"
+# Extract scaffold.files from template.json as tab-separated dest\tsource pairs.
+extract_scaffold_files() {
+  local file="$1"
+  $PYTHON_CMD -c "
+import json, sys
+with open(sys.argv[1]) as f:
+    data = json.load(f)
+files = data.get('scaffold', {}).get('files', {})
+for dest, src in files.items():
+    print(dest + '\t' + src)
+" "$file" 2>/dev/null | tr -d '\r' || true
+}
 
-  sed -i.bak \
-    -e "s|<!-- CUSTOMIZE: Project Name -->|$safe_display|g" \
-    -e "s|<!-- CUSTOMIZE: project-name -->|$safe_name|g" \
-    -e "s|<!-- CUSTOMIZE: package_name -->|$safe_pkg|g" \
-    -e "s|<!-- CUSTOMIZE: PACKAGE_NAME -->|$safe_upper_pkg|g" \
-    -e "s|<!-- CUSTOMIZE: description -->|$safe_desc|g" \
-    -e "s|<!-- CUSTOMIZE: date -->|$(date +%Y-%m-%d)|g" \
-    -e "s|<!-- CUSTOMIZE: GCP project ID -->|$safe_gcp_project|g" \
-    -e "s|<!-- CUSTOMIZE: GCP region -->|$safe_gcp_region|g" \
-    "$file" && rm -f "${file}.bak"
+# Apply all substitutions including GCP markers.
+apply_all_substitutions() {
+  local file="$1"
+  if [ -n "$GCP_PROJECT_ID" ]; then
+    substitute_markers "$file" "GCP project ID=$GCP_PROJECT_ID" "GCP region=$GCP_REGION"
+  else
+    substitute_markers "$file"
+  fi
+}
+
+# ── Build Stack Menu ─────────────────────────────────────────
+# Scan templates/*/template.json, skip base, sort by layer+name.
+build_stack_menu() {
+  STACK_NAMES=()
+  STACK_LABELS=()
+
+  local entries=()
+  for tjson in "$TEMPLATES_DIR"/*/template.json; do
+    [ -f "$tjson" ] || continue
+    local name desc layer
+    name=$(json_extract_field "$tjson" "name")
+    [ "$name" = "base" ] && continue
+    layer=$(json_extract_field "$tjson" "layer")
+    desc=$(json_extract_field "$tjson" "description")
+    entries+=("${layer:-0}	$name	$desc")
+  done
+
+  local sorted
+  sorted=$(printf '%s\n' "${entries[@]}" | sort -t$'\t' -k1n -k2)
+
+  while IFS=$'\t' read -r _layer name desc; do
+    STACK_NAMES+=("$name")
+    STACK_LABELS+=("$name — $desc")
+  done <<< "$sorted"
 }
 
 # ══════════════════════════════════════════════════════════════
 # MAIN
 # ══════════════════════════════════════════════════════════════
+main() {
+  check_deps
 
-check_deps
+  echo -e "${CYAN}${BOLD}══════════════════════════════════════════════════${NC}"
+  echo -e "${CYAN}${BOLD}  RDI Project Scaffolder${NC}"
+  echo -e "${CYAN}${BOLD}══════════════════════════════════════════════════${NC}"
+  echo ""
 
-echo -e "${CYAN}${BOLD}══════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}${BOLD}  RDI Project Scaffolder${NC}"
-echo -e "${CYAN}${BOLD}══════════════════════════════════════════════════${NC}"
-echo ""
+  # ── 1. Project Name ────────────────────────────────────────
+  local project_name
+  project_name=$(prompt_text "Project name (e.g., rdi-my-mcp)")
+  if [ -z "$project_name" ]; then
+    echo -e "${RED}Project name is required${NC}"
+    exit 1
+  fi
+  echo ""
 
-# ── 1. Project Name ──────────────────────────────────────────
-PROJECT_NAME=$(prompt_text "Project name (e.g., rdi-my-mcp)")
-if [ -z "$PROJECT_NAME" ]; then
-  echo -e "${RED}Project name is required${NC}"
-  exit 1
-fi
+  # ── 2. Stack Type ──────────────────────────────────────────
+  build_stack_menu
+  if [ ${#STACK_NAMES[@]} -eq 0 ]; then
+    echo -e "${RED}No stack templates found in $TEMPLATES_DIR${NC}"
+    exit 1
+  fi
 
-PACKAGE_NAME=$(to_snake_case "$PROJECT_NAME")
-UPPER_PACKAGE_NAME=$(to_upper_snake_case "$PROJECT_NAME")
-# Generate display name: rdi-my-mcp -> Rdi My Mcp
-PROJECT_DISPLAY_NAME=$(echo "$PROJECT_NAME" | sed 's/-/ /g' | awk '{for(i=1;i<=NF;i++) $i=toupper(substr($i,1,1)) substr($i,2)}1')
+  local stack_choice
+  stack_choice=$(prompt_choice "Stack type:" "${STACK_LABELS[@]}")
 
-echo ""
+  if [ -z "$stack_choice" ] || ! [[ "$stack_choice" =~ ^[0-9]+$ ]] || \
+     [ "$stack_choice" -lt 1 ] || [ "$stack_choice" -gt ${#STACK_NAMES[@]} ]; then
+    echo -e "${RED}Invalid choice${NC}"
+    exit 1
+  fi
+  local selected_stack="${STACK_NAMES[$((stack_choice-1))]}"
 
-# ── 2. Stack Type ────────────────────────────────────────────
-STACK_CHOICE=$(prompt_choice "Stack type:" "Python/FastMCP" "Next.js (coming soon)" "Go (coming soon)")
+  if ! resolve_chain "$selected_stack"; then
+    echo -e "${RED}Error: Failed to resolve template chain for '$selected_stack'${NC}"
+    exit 1
+  fi
+  echo -e "${DIM}Chain: ${TEMPLATE_CHAIN[*]}${NC}"
+  echo ""
 
-case $STACK_CHOICE in
-  1) STACK="python-fastmcp" ;;
-  2) echo -e "${YELLOW}Next.js scaffolding is not yet available.${NC}"; exit 0 ;;
-  3) echo -e "${YELLOW}Go scaffolding is not yet available.${NC}"; exit 0 ;;
-  *) echo -e "${RED}Invalid choice${NC}"; exit 1 ;;
-esac
+  # ── Set META_* globals from user input ─────────────────────
+  META_PROJECT_NAME="$project_name"
+  META_PACKAGE_NAME=$(echo "$project_name" | sed 's/[- ]/_/g')
+  META_DISPLAY_NAME=$($PYTHON_CMD -c "import sys; print(sys.argv[1].replace('-', ' ').title())" "$project_name" 2>/dev/null) || true
+  META_DISPLAY_NAME="${META_DISPLAY_NAME//$'\r'/}"
+  META_DEFAULT_BRANCH="develop"
 
-TEMPLATE_DIR="$TEMPLATES_DIR/$STACK"
-if [ ! -d "$TEMPLATE_DIR" ]; then
-  echo -e "${RED}Template not found: $TEMPLATE_DIR${NC}"
-  exit 1
-fi
+  # ── 3. Description ─────────────────────────────────────────
+  META_DESCRIPTION=$(prompt_text "Brief project description" "")
+  echo ""
 
-echo ""
+  # ── 4. GitHub Remote ───────────────────────────────────────
+  local github_remote="" create_remote=false
+  if prompt_yn "Create GitHub remote?" "n"; then
+    create_remote=true
+    github_remote=$(prompt_text "GitHub repo name" "RonHadler/$project_name")
+  fi
+  echo ""
 
-# ── 3. Description ───────────────────────────────────────────
-PROJECT_DESCRIPTION=$(prompt_text "Brief project description" "A FastMCP server for...")
-echo ""
+  # ── 5. GCP Project ────────────────────────────────────────
+  GCP_PROJECT_ID=""
+  GCP_REGION="us-central1"
+  local gcp_input
+  gcp_input=$(prompt_text "GCP project ID (or 'skip')" "skip")
+  if [ "$gcp_input" != "skip" ]; then
+    GCP_PROJECT_ID="$gcp_input"
+    GCP_REGION=$(prompt_text "GCP region" "us-central1")
+  fi
+  echo ""
 
-# ── 4. GitHub Remote ─────────────────────────────────────────
-GITHUB_REMOTE=""
-CREATE_REMOTE=false
-if prompt_yn "Create GitHub remote?" "n"; then
-  CREATE_REMOTE=true
-  GITHUB_REMOTE=$(prompt_text "GitHub repo name" "RonHadler/$PROJECT_NAME")
-fi
-echo ""
+  # ── 6. Create tasks.json ──────────────────────────────────
+  local create_tasks=true
+  if ! prompt_yn "Create tasks.json for Ralph Loop?" "y"; then
+    create_tasks=false
+  fi
+  echo ""
 
-# ── 5. GitHub Actions ────────────────────────────────────────
-SELECTED_WORKFLOWS=("ci" "security" "gemini-code-review")
-echo -e "${BOLD}GitHub Actions workflows:${NC}"
-echo -e "  Default: ${CYAN}ci, security, gemini-code-review${NC}"
-echo -e "  Available: ci, security, gemini-code-review, gemini-on-demand, deploy-cloudrun, stale, dependabot"
-EXTRA_WORKFLOWS=$(prompt_text "Additional workflows (comma-separated, or Enter for defaults)" "")
-if [ -n "$EXTRA_WORKFLOWS" ]; then
-  IFS=',' read -ra extras <<< "$EXTRA_WORKFLOWS"
-  for w in "${extras[@]}"; do
-    w=$(echo "$w" | xargs)  # trim whitespace
-    SELECTED_WORKFLOWS+=("$w")
+  # ── Target Directory ───────────────────────────────────────
+  local parent_dir target_dir
+  parent_dir="$(dirname "$DEV_ENV_DIR")"
+  target_dir="$parent_dir/$project_name"
+
+  if [ -d "$target_dir" ]; then
+    echo -e "${RED}Directory already exists: $target_dir${NC}"
+    exit 1
+  fi
+
+  # ══════════════════════════════════════════════════════════
+  # SCAFFOLDING
+  # ══════════════════════════════════════════════════════════
+
+  echo -e "${BOLD}Creating project: $project_name${NC}"
+  echo -e "${DIM}Location: $target_dir${NC}"
+  echo -e "${DIM}Stack: $selected_stack (${TEMPLATE_CHAIN[*]})${NC}"
+  echo ""
+
+  mkdir -p "$target_dir"
+  mkdir -p "$target_dir/.github/workflows"
+
+  # ── Shared locals for scaffolding sections ──────────────────
+  local tjson dir_entry dest_dir stack dest_rel source_path
+  local j try_stack seeded_len actual_skeleton sk
+  local dest_key src_path source_file dest_file rel_path
+
+  # ── A. Scaffold directories from template chain ────────────
+  for stack in "${TEMPLATE_CHAIN[@]}"; do
+    tjson="$TEMPLATES_DIR/$stack/template.json"
+    while IFS= read -r dir_entry; do
+      [ -z "$dir_entry" ] && continue
+      dest_dir=$(resolve_scaffold_dest "$dir_entry" "$target_dir")
+      mkdir -p "$dest_dir"
+    done < <(json_extract_array "$tjson" "scaffold.directories")
   done
-fi
-echo ""
+  echo -e "  ${GREEN}+${NC} Scaffold directories"
 
-# ── 6. GCP Project ──────────────────────────────────────────
-GCP_PROJECT_ID=""
-GCP_REGION="us-central1"
-GCP_INPUT=$(prompt_text "GCP project ID (or 'skip')" "skip")
-if [ "$GCP_INPUT" != "skip" ]; then
-  GCP_PROJECT_ID="$GCP_INPUT"
-  GCP_REGION=$(prompt_text "GCP region" "us-central1")
-fi
-echo ""
-
-# ── 7. Create tasks.json ────────────────────────────────────
-CREATE_TASKS=true
-if ! prompt_yn "Create tasks.json for Ralph Loop?" "y"; then
-  CREATE_TASKS=false
-fi
-echo ""
-
-# ── Target Directory ─────────────────────────────────────────
-# Default to parent of rdi-dev-env (typically C:\Dev)
-PARENT_DIR="$(dirname "$DEV_ENV_DIR")"
-TARGET_DIR="$PARENT_DIR/$PROJECT_NAME"
-
-if [ -d "$TARGET_DIR" ]; then
-  echo -e "${RED}Directory already exists: $TARGET_DIR${NC}"
-  exit 1
-fi
-
-# ══════════════════════════════════════════════════════════════
-# SCAFFOLDING
-# ══════════════════════════════════════════════════════════════
-
-echo -e "${BOLD}Creating project: $PROJECT_NAME${NC}"
-echo -e "${DIM}Location: $TARGET_DIR${NC}"
-echo ""
-
-# ── Create directory structure ───────────────────────────────
-mkdir -p "$TARGET_DIR"
-mkdir -p "$TARGET_DIR/$PACKAGE_NAME/models"
-mkdir -p "$TARGET_DIR/$PACKAGE_NAME/tools"
-mkdir -p "$TARGET_DIR/tests/tools"
-mkdir -p "$TARGET_DIR/docs/adr"
-mkdir -p "$TARGET_DIR/docs/stories"
-mkdir -p "$TARGET_DIR/docs/requirements"
-mkdir -p "$TARGET_DIR/.github/workflows"
-
-# ── Copy and customize templates ─────────────────────────────
-
-# Root files from python-fastmcp template
-for file in CLAUDE.md AGENTS.md GEMINI.md pyproject.toml Makefile Dockerfile .gitignore .env.example; do
-  if [ -f "$TEMPLATE_DIR/$file" ]; then
-    cp "$TEMPLATE_DIR/$file" "$TARGET_DIR/$file"
-    substitute_markers "$TARGET_DIR/$file"
-    echo -e "  ${GREEN}+${NC} $file"
+  # ── B. Python: create package root ─────────────────────────
+  if is_python_stack; then
+    mkdir -p "$target_dir/$META_PACKAGE_NAME"
   fi
-done
 
-# tasks.json (optional)
-if [ "$CREATE_TASKS" = true ] && [ -f "$TEMPLATE_DIR/tasks.json" ]; then
-  cp "$TEMPLATE_DIR/tasks.json" "$TARGET_DIR/tasks.json"
-  substitute_markers "$TARGET_DIR/tasks.json"
-  echo -e "  ${GREEN}+${NC} tasks.json"
-fi
+  # ── C. Managed files (CI workflows, review config) ─────────
+  collect_managed_files
 
-# Scaffold source files into package directory
-for file in coordinator.py config.py server.py __main__.py; do
-  if [ -f "$TEMPLATE_DIR/scaffold/$file" ]; then
-    cp "$TEMPLATE_DIR/scaffold/$file" "$TARGET_DIR/$PACKAGE_NAME/$file"
-    substitute_markers "$TARGET_DIR/$PACKAGE_NAME/$file"
-    echo -e "  ${GREEN}+${NC} $PACKAGE_NAME/$file"
+  echo ""
+  echo -e "${BOLD}Managed Files${NC} ${DIM}(CI workflows, review config)${NC}"
+  if [ ${#MANAGED_FILES[@]} -eq 0 ]; then
+    echo -e "  ${DIM}(no managed files in template chain)${NC}"
   fi
-done
 
-# __init__.py files
-touch "$TARGET_DIR/$PACKAGE_NAME/__init__.py"
-touch "$TARGET_DIR/$PACKAGE_NAME/models/__init__.py"
-touch "$TARGET_DIR/$PACKAGE_NAME/tools/__init__.py"
-touch "$TARGET_DIR/tests/__init__.py"
-touch "$TARGET_DIR/tests/tools/__init__.py"
-echo -e "  ${GREEN}+${NC} __init__.py files"
+  for entry in "${MANAGED_FILES[@]}"; do
+    stack="${entry%%:*}"
+    dest_rel="${entry#*:}"
 
-# Test files from scaffold
-for file in conftest.py test_coordinator.py; do
-  if [ -f "$TEMPLATE_DIR/scaffold/tests/$file" ]; then
-    cp "$TEMPLATE_DIR/scaffold/tests/$file" "$TARGET_DIR/tests/$file"
-    substitute_markers "$TARGET_DIR/tests/$file"
-    echo -e "  ${GREEN}+${NC} tests/$file"
-  fi
-done
-
-# ── GitHub Actions workflows ─────────────────────────────────
-WORKFLOWS_DIR="$TEMPLATES_DIR/github-workflows"
-for workflow in "${SELECTED_WORKFLOWS[@]}"; do
-  workflow_file="$workflow.yml"
-  if [ "$workflow" = "dependabot" ]; then
-    # Dependabot goes in .github/ not .github/workflows/
-    if [ -f "$WORKFLOWS_DIR/dependabot.yml" ]; then
-      cp "$WORKFLOWS_DIR/dependabot.yml" "$TARGET_DIR/.github/dependabot.yml"
-      echo -e "  ${GREEN}+${NC} .github/dependabot.yml"
+    # Resolve source: declaring stack first, then walk chain backwards
+    source_path=$(resolve_workflow_source "$stack" "$dest_rel")
+    if [ -z "$source_path" ] || [ ! -f "$source_path" ]; then
+      j=${#TEMPLATE_CHAIN[@]}
+      while [ $j -gt 0 ]; do
+        ((j--)) || true
+        try_stack="${TEMPLATE_CHAIN[$j]}"
+        source_path=$(resolve_workflow_source "$try_stack" "$dest_rel")
+        if [ -n "$source_path" ] && [ -f "$source_path" ]; then
+          break
+        fi
+        source_path=""
+      done
     fi
-  elif [ -f "$WORKFLOWS_DIR/$workflow_file" ]; then
-    cp "$WORKFLOWS_DIR/$workflow_file" "$TARGET_DIR/.github/workflows/$workflow_file"
-    echo -e "  ${GREEN}+${NC} .github/workflows/$workflow_file"
-  else
-    echo -e "  ${YELLOW}~${NC} Workflow not found: $workflow_file"
+
+    if [ -z "$source_path" ]; then
+      echo -e "  ${YELLOW}~${NC} $dest_rel — template source not found"
+      continue
+    fi
+
+    mkdir -p "$(dirname "$target_dir/$dest_rel")"
+    cp "$source_path" "$target_dir/$dest_rel"
+    apply_all_substitutions "$target_dir/$dest_rel"
+    echo -e "  ${GREEN}+${NC} $dest_rel"
+  done
+
+  # ── D. Seeded files (CLAUDE.md, AGENTS.md, Makefile, etc.) ─
+  collect_seeded_files
+
+  echo ""
+  echo -e "${BOLD}Seeded Files${NC} ${DIM}(project-owned after creation)${NC}"
+
+  seeded_len=${#SEEDED_MAP_KEYS[@]}
+  for ((i=0; i<seeded_len; i++)); do
+    dest_rel="${SEEDED_MAP_KEYS[$i]}"
+    stack="${SEEDED_MAP_VALUES[$i]}"
+
+    # .gitignore handled separately by copy_gitignore
+    [ "$dest_rel" = ".gitignore" ] && continue
+
+    local dest_path
+    dest_path="$target_dir/$dest_rel"
+
+    # Check for skeleton (most specific layer wins)
+    actual_skeleton=""
+    for s in "${TEMPLATE_CHAIN[@]}"; do
+      sk="$TEMPLATES_DIR/$s/skeletons/${dest_rel}.skeleton"
+      if [ -f "$sk" ]; then
+        actual_skeleton="$sk"
+      fi
+    done
+
+    if [ -n "$actual_skeleton" ]; then
+      # Assemble from skeleton + fragments
+      local tmpfile
+      tmpfile=$(mktemp)
+      assemble_file "$actual_skeleton" "$tmpfile"
+      apply_all_substitutions "$tmpfile"
+      mkdir -p "$(dirname "$dest_path")"
+      cat "$tmpfile" > "$dest_path"
+      rm -f "$tmpfile"
+      echo -e "  ${GREEN}+${NC} $dest_rel (assembled)"
+    else
+      # Direct copy — try exact name, then .template suffix
+      source_path="$TEMPLATES_DIR/$stack/$dest_rel"
+      if [ ! -f "$source_path" ]; then
+        source_path="$TEMPLATES_DIR/$stack/${dest_rel}.template"
+      fi
+
+      if [ -f "$source_path" ]; then
+        mkdir -p "$(dirname "$dest_path")"
+        cp "$source_path" "$dest_path"
+        apply_all_substitutions "$dest_path"
+        echo -e "  ${GREEN}+${NC} $dest_rel"
+      else
+        echo -e "  ${YELLOW}~${NC} $dest_rel — source not found in $stack/"
+      fi
+    fi
+  done
+
+  # ── E. Scaffold source files (coordinator.py, etc.) ────────
+  echo ""
+  echo -e "${BOLD}Scaffold Files${NC} ${DIM}(initial source code)${NC}"
+
+  local has_scaffold_files=false
+  for stack in "${TEMPLATE_CHAIN[@]}"; do
+    tjson="$TEMPLATES_DIR/$stack/template.json"
+    while IFS=$'\t' read -r dest_key src_path; do
+      [ -z "$dest_key" ] && continue
+      has_scaffold_files=true
+
+      source_file="$TEMPLATES_DIR/$stack/$src_path"
+      if [ ! -f "$source_file" ]; then
+        echo -e "  ${YELLOW}~${NC} $dest_key — scaffold source not found: $src_path"
+        continue
+      fi
+
+      dest_file=$(resolve_scaffold_dest "$dest_key" "$target_dir")
+      mkdir -p "$(dirname "$dest_file")"
+      cp "$source_file" "$dest_file"
+      apply_all_substitutions "$dest_file"
+
+      rel_path="${dest_file#"$target_dir/"}"
+      echo -e "  ${GREEN}+${NC} $rel_path"
+    done < <(extract_scaffold_files "$tjson")
+  done
+  if [ "$has_scaffold_files" = false ]; then
+    echo -e "  ${DIM}(no scaffold files in template chain)${NC}"
   fi
-done
 
-# ── Docs ─────────────────────────────────────────────────────
-cat > "$TARGET_DIR/docs/current-tasks.md" <<EOF
-# $PROJECT_DISPLAY_NAME — Current Tasks
+  # ── F. Python: create __init__.py files ────────────────────
+  if is_python_stack; then
+    while IFS= read -r d; do
+      touch "$d/__init__.py"
+    done < <(find "$target_dir/$META_PACKAGE_NAME" -type d 2>/dev/null)
+    if [ -d "$target_dir/tests" ]; then
+      while IFS= read -r d; do
+        touch "$d/__init__.py"
+      done < <(find "$target_dir/tests" -type d 2>/dev/null)
+    fi
+    echo -e "  ${GREEN}+${NC} __init__.py files"
+  fi
 
-## Current Sprint Goal
-Initial project setup and core tool implementation.
+  # ── G. .gitignore (concatenated from chain) ────────────────
+  copy_gitignore "$target_dir"
+  if ! grep -qF '.sdlc/' "$target_dir/.gitignore" 2>/dev/null; then
+    {
+      echo ""
+      echo "# SDLC pipeline"
+      echo ".sdlc/"
+    } >> "$target_dir/.gitignore"
+  fi
+  echo -e "  ${GREEN}+${NC} .gitignore (${#TEMPLATE_CHAIN[@]} layers)"
 
-## In Progress
-- None
+  # ── H. tasks.json (optional) ──────────────────────────────
+  if [ "$create_tasks" = true ]; then
+    local tasks_source=""
+    for stack in "${TEMPLATE_CHAIN[@]}"; do
+      if [ -f "$TEMPLATES_DIR/$stack/tasks.json" ]; then
+        tasks_source="$TEMPLATES_DIR/$stack/tasks.json"
+      fi
+    done
+    if [ -n "$tasks_source" ]; then
+      cp "$tasks_source" "$target_dir/tasks.json"
+      apply_all_substitutions "$target_dir/tasks.json"
+      echo -e "  ${GREEN}+${NC} tasks.json"
+    fi
+  fi
 
-## Up Next
-- TASK-002: Add health check tool and /health custom route
-
-## Completed
-- TASK-001: Scaffold project structure
-
-## Blocked
-- None
-EOF
-echo -e "  ${GREEN}+${NC} docs/current-tasks.md"
-
-cat > "$TARGET_DIR/docs/adr/adr-001-fastmcp-architecture.md" <<EOF
-# ADR-001: FastMCP 3.x Architecture
-
-## Status
-Accepted
-
-## Context
-$PROJECT_DISPLAY_NAME needs an MCP server framework. FastMCP 3.x provides a mature, async-first framework with decorator-based tool registration, Pydantic integration, and built-in transport support (streamable-http, stdio, SSE).
-
-## Decision
-Use FastMCP 3.x with the coordinator singleton pattern:
-- \`coordinator.py\` — FastMCP singleton instance
-- \`config.py\` — Pydantic BaseSettings singleton
-- \`server.py\` — Entry point (dotenv → import tools → mcp.run())
-- \`tools/\` — One file per domain, \`@mcp.tool()\` decorators
-
-## Consequences
-- **Positive:** Consistent with rdi-poe-mcp, familiar pattern, testable, async-native
-- **Negative:** Tied to FastMCP 3.x API, singleton pattern limits test isolation (use monkeypatch)
-EOF
-echo -e "  ${GREEN}+${NC} docs/adr/adr-001-fastmcp-architecture.md"
-
-# ── README.md ────────────────────────────────────────────────
-cat > "$TARGET_DIR/README.md" <<EOF
-# $PROJECT_DISPLAY_NAME
-
-$PROJECT_DESCRIPTION
-
-## Quick Start
-
-\`\`\`bash
-# Install dependencies
+  # ── I. README.md ──────────────────────────────────────────
+  local quick_start_cmds
+  case "$selected_stack" in
+    python*)
+      quick_start_cmds="# Install dependencies
 uv sync
 
 # Run tests
@@ -365,7 +466,50 @@ make test
 make dev-serve
 
 # Start stdio transport (for local MCP clients)
-make dev-stdio
+make dev-stdio"
+      ;;
+    go)
+      quick_start_cmds="# Start development containers
+make up
+
+# Run tests
+make test
+
+# Open development shell
+make shell"
+      ;;
+    node)
+      quick_start_cmds="# Install dependencies
+npm install
+
+# Run tests
+npm test
+
+# Start development server
+npm run dev"
+      ;;
+    rust)
+      quick_start_cmds="# Build
+cargo build
+
+# Run tests
+cargo test"
+      ;;
+    *)
+      quick_start_cmds="# See Makefile for available commands
+make help"
+      ;;
+  esac
+
+  cat > "$target_dir/README.md" <<EOF
+# $META_DISPLAY_NAME
+
+$META_DESCRIPTION
+
+## Quick Start
+
+\`\`\`bash
+$quick_start_cmds
 \`\`\`
 
 ## Development
@@ -383,96 +527,168 @@ make build
 git push origin develop
 \`\`\`
 EOF
-echo -e "  ${GREEN}+${NC} README.md"
+  echo -e "  ${GREEN}+${NC} README.md"
 
-echo ""
+  # ── J. docs/current-tasks.md ──────────────────────────────
+  cat > "$target_dir/docs/current-tasks.md" <<EOF
+# $META_DISPLAY_NAME — Current Tasks
 
-# ══════════════════════════════════════════════════════════════
-# POST-SCAFFOLD
-# ══════════════════════════════════════════════════════════════
+## Current Sprint Goal
+Initial project setup and core implementation.
 
-cd "$TARGET_DIR" || exit 1
+## In Progress
+- None
 
-# ── Ensure .sdlc/ is in .gitignore (all stacks) ─────────────
-if [ -f "$TARGET_DIR/.gitignore" ]; then
-  if ! grep -qF '.sdlc/' "$TARGET_DIR/.gitignore" 2>/dev/null; then
-    echo "" >> "$TARGET_DIR/.gitignore"
-    echo "# SDLC pipeline" >> "$TARGET_DIR/.gitignore"
-    echo ".sdlc/" >> "$TARGET_DIR/.gitignore"
-    echo -e "  ${GREEN}+${NC} Added .sdlc/ to .gitignore"
+## Up Next
+- TASK-002: Implement first feature
+
+## Completed
+- TASK-001: Scaffold project structure
+
+## Blocked
+- None
+EOF
+  echo -e "  ${GREEN}+${NC} docs/current-tasks.md"
+
+  echo ""
+
+  # ══════════════════════════════════════════════════════════
+  # POST-SCAFFOLD
+  # ══════════════════════════════════════════════════════════
+
+  cd "$target_dir" || exit 1
+
+  # ── Install dependencies / generate lockfile ───────────────
+  echo -e "${BOLD}Installing dependencies...${NC}"
+  if [ -f "$target_dir/pyproject.toml" ]; then
+    if command -v uv &>/dev/null; then
+      if uv sync 2>&1 | tail -5; then
+        echo -e "  ${GREEN}+${NC} Dependencies installed (uv sync)"
+      else
+        echo -e "  ${YELLOW}~${NC} uv sync failed — run manually"
+      fi
+    else
+      echo -e "  ${YELLOW}~${NC} uv not found — run 'uv sync' manually"
+    fi
+  elif [ -f "$target_dir/package.json" ]; then
+    if command -v npm &>/dev/null; then
+      if npm install 2>&1 | tail -5; then
+        echo -e "  ${GREEN}+${NC} Dependencies installed (npm install)"
+      else
+        echo -e "  ${YELLOW}~${NC} npm install failed — run manually"
+      fi
+    else
+      echo -e "  ${YELLOW}~${NC} npm not found — run 'npm install' manually"
+    fi
+  elif [ -f "$target_dir/go.mod" ]; then
+    if command -v go &>/dev/null; then
+      if go mod tidy 2>&1 | tail -5; then
+        echo -e "  ${GREEN}+${NC} Dependencies resolved (go mod tidy)"
+      else
+        echo -e "  ${YELLOW}~${NC} go mod tidy failed — run manually"
+      fi
+    else
+      echo -e "  ${YELLOW}~${NC} go not found — run 'go mod tidy' manually"
+    fi
+  elif [ -f "$target_dir/Cargo.toml" ]; then
+    if command -v cargo &>/dev/null; then
+      if cargo generate-lockfile 2>&1 | tail -5; then
+        echo -e "  ${GREEN}+${NC} Lockfile generated (cargo)"
+      else
+        echo -e "  ${YELLOW}~${NC} cargo generate-lockfile failed — run manually"
+      fi
+    else
+      echo -e "  ${YELLOW}~${NC} cargo not found — generate Cargo.lock manually"
+    fi
   fi
-fi
+  echo ""
 
-# ── Install dependencies ─────────────────────────────────────
-echo -e "${BOLD}Installing dependencies...${NC}"
-if command -v uv &>/dev/null; then
-  if uv sync 2>&1 | tail -5; then
-    echo -e "  ${GREEN}+${NC} Dependencies installed"
+  # ── Run initial tests ─────────────────────────────────────
+  echo -e "${BOLD}Running initial tests...${NC}"
+  if [ -f "$target_dir/pyproject.toml" ] && command -v uv &>/dev/null; then
+    if uv run pytest tests/ -v 2>&1 | tail -10; then
+      echo -e "  ${GREEN}+${NC} Initial tests pass"
+    else
+      echo -e "  ${YELLOW}~${NC} Tests failed — check the output above"
+    fi
+  elif [ -f "$target_dir/package.json" ] && command -v npm &>/dev/null; then
+    if npm test 2>&1 | tail -10; then
+      echo -e "  ${GREEN}+${NC} Initial tests pass"
+    else
+      echo -e "  ${YELLOW}~${NC} Tests failed — check the output above"
+    fi
+  elif [ -f "$target_dir/go.mod" ] && command -v go &>/dev/null; then
+    if go test ./... 2>&1 | tail -10; then
+      echo -e "  ${GREEN}+${NC} Initial tests pass"
+    else
+      echo -e "  ${YELLOW}~${NC} Tests failed — check the output above"
+    fi
+  elif [ -f "$target_dir/Cargo.toml" ] && command -v cargo &>/dev/null; then
+    if cargo test 2>&1 | tail -10; then
+      echo -e "  ${GREEN}+${NC} Initial tests pass"
+    else
+      echo -e "  ${YELLOW}~${NC} Tests failed — check the output above"
+    fi
   else
-    echo -e "  ${YELLOW}~${NC} uv sync failed — run manually"
+    echo -e "  ${DIM}-${NC} Skipping tests (tool not available)"
   fi
-else
-  echo -e "  ${YELLOW}~${NC} uv not found — run 'uv sync' manually"
-fi
-echo ""
+  echo ""
 
-# ── Verify tests pass ───────────────────────────────────────
-echo -e "${BOLD}Running initial tests...${NC}"
-if command -v uv &>/dev/null; then
-  if uv run pytest tests/ -v 2>&1 | tail -10; then
-    echo -e "  ${GREEN}+${NC} Initial tests pass"
-  else
-    echo -e "  ${YELLOW}~${NC} Tests failed — check the output above"
-  fi
-else
-  echo -e "  ${DIM}-${NC} Skipping tests (uv not available)"
-fi
-echo ""
-
-# ── Git init ─────────────────────────────────────────────────
-echo -e "${BOLD}Initializing git...${NC}"
-git init -q
-git checkout -b develop
-git add -A
-git commit -q -m "feat: scaffold $PROJECT_NAME
+  # ── Git init ──────────────────────────────────────────────
+  echo -e "${BOLD}Initializing git...${NC}"
+  git init -q
+  git checkout -b develop
+  git add -A
+  git commit -q -m "$(cat <<'COMMITMSG'
+feat: scaffold project
 
 Initial project structure created by rdi-dev-env scaffolder.
-Stack: Python/FastMCP 3.x
 
-Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+COMMITMSG
+)"
 
-# Create staging and main branches
-git branch staging
-git branch main
-echo -e "  ${GREEN}+${NC} Git initialized (develop/staging/main)"
-echo ""
-
-# ── GitHub Remote ────────────────────────────────────────────
-if [ "$CREATE_REMOTE" = true ] && command -v gh &>/dev/null; then
-  echo -e "${BOLD}Creating GitHub remote...${NC}"
-  gh repo create "$GITHUB_REMOTE" --private --source=. --push 2>&1 | tail -3
-  echo -e "  ${GREEN}+${NC} GitHub remote created"
+  # Create staging and main branches
+  git branch staging
+  git branch main
+  echo -e "  ${GREEN}+${NC} Git initialized (develop/staging/main)"
   echo ""
-fi
 
-# ══════════════════════════════════════════════════════════════
-# SUMMARY
-# ══════════════════════════════════════════════════════════════
-echo -e "${CYAN}${BOLD}══════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}${BOLD}  Project Created: $PROJECT_NAME${NC}"
-echo -e "${CYAN}${BOLD}══════════════════════════════════════════════════${NC}"
-echo ""
-echo -e "  ${BOLD}Location:${NC}    $TARGET_DIR"
-echo -e "  ${BOLD}Stack:${NC}       Python/FastMCP 3.x"
-echo -e "  ${BOLD}Package:${NC}     $PACKAGE_NAME"
-echo -e "  ${BOLD}Branches:${NC}    develop (default), staging, main"
-if [ "$CREATE_TASKS" = true ]; then
-  echo -e "  ${BOLD}Tasks:${NC}       tasks.json (4 tasks, 1 pre-completed)"
-fi
-echo ""
-echo -e "${BOLD}Next steps:${NC}"
-echo -e "  cd $TARGET_DIR"
-echo -e "  claude                     # Start Claude Code"
-echo -e "  make dev-serve             # Start dev server"
-echo -e "  ralph-loop.sh --once       # Run next task autonomously"
-echo ""
+  # ── GitHub Remote ──────────────────────────────────────────
+  if [ "$create_remote" = true ] && command -v gh &>/dev/null; then
+    echo -e "${BOLD}Creating GitHub remote...${NC}"
+    gh repo create "$github_remote" --private --source=. --push 2>&1 | tail -3
+    echo -e "  ${GREEN}+${NC} GitHub remote created"
+    echo ""
+  fi
+
+  # ══════════════════════════════════════════════════════════
+  # SUMMARY
+  # ══════════════════════════════════════════════════════════
+  echo -e "${CYAN}${BOLD}══════════════════════════════════════════════════${NC}"
+  echo -e "${CYAN}${BOLD}  Project Created: $project_name${NC}"
+  echo -e "${CYAN}${BOLD}══════════════════════════════════════════════════${NC}"
+  echo ""
+  echo -e "  ${BOLD}Location:${NC}    $target_dir"
+  echo -e "  ${BOLD}Stack:${NC}       $selected_stack (${TEMPLATE_CHAIN[*]})"
+  echo -e "  ${BOLD}Package:${NC}     $META_PACKAGE_NAME"
+  echo -e "  ${BOLD}Branches:${NC}    develop (default), staging, main"
+  echo ""
+  echo -e "${BOLD}Next steps:${NC}"
+  echo -e "  cd $target_dir"
+  echo -e "  claude                     # Start Claude Code"
+
+  case "$selected_stack" in
+    python*)
+      echo -e "  make dev-serve             # Start dev server" ;;
+    go)
+      echo -e "  make up                    # Start dev containers" ;;
+    node)
+      echo -e "  npm run dev                # Start dev server" ;;
+    rust)
+      echo -e "  cargo run                  # Run project" ;;
+  esac
+  echo ""
+}
+
+main "$@"
