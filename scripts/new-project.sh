@@ -81,6 +81,7 @@ prompt_yn() {
 }
 
 # ── Dependency Check ─────────────────────────────────────────
+# Note: Python is validated by template-utils.sh on source (exits if missing).
 check_deps() {
   if ! command -v git &>/dev/null; then
     echo -e "${RED}Missing required dependency: git${NC}"
@@ -124,7 +125,8 @@ extract_scaffold_files() {
 import json, sys
 with open(sys.argv[1]) as f:
     data = json.load(f)
-files = data.get('scaffold', {}).get('files', {})
+scaffold = data.get('scaffold') or {}
+files = scaffold.get('files') or {}
 for dest, src in files.items():
     print(dest + '\t' + src)
 " "$file" 2>/dev/null | tr -d '\r' || true
@@ -214,8 +216,7 @@ main() {
   # ── Set META_* locals (inherited by called functions) ───────
   # shellcheck disable=SC2034  # META_* consumed by substitute_markers() in template-utils.sh
   local META_PROJECT_NAME="$project_name"
-  local META_PACKAGE_NAME
-  META_PACKAGE_NAME=$(echo "$project_name" | sed 's/[- ]/_/g')
+  local META_PACKAGE_NAME="${project_name//[- ]/_}"
   local META_DISPLAY_NAME
   META_DISPLAY_NAME=$($PYTHON_CMD -c "import sys; print(sys.argv[1].replace('-', ' ').title())" "$project_name" 2>/dev/null) || true
   META_DISPLAY_NAME="${META_DISPLAY_NAME//$'\r'/}"
@@ -265,6 +266,12 @@ main() {
   # ══════════════════════════════════════════════════════════
   # SCAFFOLDING
   # ══════════════════════════════════════════════════════════
+
+  # Clean up temp files on exit/interrupt
+  local _tmpfiles=()
+  # shellcheck disable=SC2317  # trap callback is invoked indirectly
+  _cleanup() { [ ${#_tmpfiles[@]} -gt 0 ] && rm -f "${_tmpfiles[@]}" 2>/dev/null || true; }
+  trap _cleanup EXIT
 
   echo -e "${BOLD}Creating project: $project_name${NC}"
   echo -e "${DIM}Location: $target_dir${NC}"
@@ -364,6 +371,7 @@ main() {
       # Assemble from skeleton + fragments
       local tmpfile
       tmpfile=$(mktemp)
+      _tmpfiles+=("$tmpfile")
       assemble_file "$actual_skeleton" "$tmpfile"
       apply_all_substitutions "$tmpfile"
       mkdir -p "$(dirname "$dest_path")"
