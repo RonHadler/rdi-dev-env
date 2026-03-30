@@ -3,8 +3,10 @@
 # rdi-refresh — Refresh managed files from rdi-dev-env templates
 #
 # Copies "managed" files (CI workflows, review standards, dependabot)
-# from templates into a target project, applying project-specific
-# substitutions automatically from pyproject.toml metadata.
+# from the template chain into a target project, applying project-specific
+# substitutions automatically from manifest metadata.
+#
+# Supports Python, Go, Node, Rust, and FastMCP projects via auto-detection.
 #
 # Does NOT touch "seeded" files (Makefile, conftest, config, Dockerfile)
 # that the project owns. Use rdi-audit for those.
@@ -32,164 +34,42 @@ NC='\033[0m'
 # ── Paths ────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEV_ENV_DIR="$(dirname "$SCRIPT_DIR")"
+# shellcheck disable=SC2034  # Used by sourced template-utils.sh
 TEMPLATES_DIR="$DEV_ENV_DIR/templates"
 
-# ── Globals populated by extract_metadata ─────────────────────
-PROJECT_NAME=""
-PACKAGE_NAME=""
-UPPER_PACKAGE_NAME=""
-DISPLAY_NAME=""
-DESCRIPTION=""
-DEFAULT_BRANCH="main"
-
-# ── Python command (python3 or python) ───────────────────────
-PYTHON_CMD="python3"
-if ! python3 --version &>/dev/null; then
-  PYTHON_CMD="python"
-fi
-if ! command -v "$PYTHON_CMD" &>/dev/null; then
-  echo -e "${RED}Error:${NC} Python not found (need python3 or python)" >&2
-  exit 1
-fi
+# Source shared template utilities (provides PYTHON_CMD, detect_stack,
+# resolve_chain, collect_managed_files, collect_seeded_files,
+# extract_metadata, resolve_workflow_source, substitute_markers)
+source "$SCRIPT_DIR/lib/template-utils.sh"
 
 # ── Cleanup temp files on exit ───────────────────────────────
 TMPFILES=()
 cleanup() { [ ${#TMPFILES[@]} -gt 0 ] && rm -f "${TMPFILES[@]}" 2>/dev/null || true; }
 trap cleanup EXIT
 
-# ── Managed file manifest ────────────────────────────────────
-# Format: "template_source:project_destination"
-# These files are owned by rdi-dev-env and can be overwritten safely.
-MANAGED_FILES=(
-  # CI workflows (need substitutions)
-  "github-workflows/ci-python.yml:.github/workflows/ci.yml"
-  "github-workflows/security-python.yml:.github/workflows/security.yml"
-  "github-workflows/gemini-code-review.yml:.github/workflows/gemini-code-review.yml"
-  # CI workflows (no substitutions needed)
-  "github-workflows/stale.yml:.github/workflows/stale.yml"
-  "github-workflows/dependabot.yml:.github/dependabot.yml"
-)
-
-# Seeded files — created once if missing, never overwritten.
-# Project owns these after initial creation.
-SEEDED_FILES=(
-  "GEMINI.md:GEMINI.md"
-)
-
-# ── Extract project metadata from pyproject.toml ─────────────
-extract_metadata() {
-  local project_dir="$1"
-  local pyproject="$project_dir/pyproject.toml"
-
-  if [ ! -f "$pyproject" ]; then
-    echo -e "${RED}Error:${NC} No pyproject.toml found in $project_dir" >&2
-    return 1
-  fi
-
-  # Output TSV directly from Python — no jq/node dependency needed
-  local py_script
-  py_script=$(cat <<'PYEOF'
-import sys
-try:
-    import tomllib
-except ImportError:
-    try:
-        import tomli as tomllib
-    except ImportError:
-        sys.exit(1)
-with open(sys.argv[1], "rb") as f:
-    p = tomllib.load(f).get("project", {})
-name = p.get("name", "")
-desc = p.get("description", "").replace("\n", " ").replace("\t", " ").strip()
-pkg = name.replace("-", "_")
-print(f"{name}\t{pkg}\t{pkg.upper()}\t{name.replace('-', ' ').title()}\t{desc}")
-PYEOF
-)
-  local metadata
-  if ! metadata=$("$PYTHON_CMD" -c "$py_script" "$pyproject" 2>/dev/null); then
-    echo -e "${RED}Error:${NC} Could not parse pyproject.toml (file may be malformed, or requires Python 3.11+ / 'tomli')" >&2
-    return 1
-  fi
-
-  IFS=$'\t' read -r PROJECT_NAME PACKAGE_NAME UPPER_PACKAGE_NAME DISPLAY_NAME DESCRIPTION <<< "$metadata"
-
-  if [ -z "$PROJECT_NAME" ]; then
-    echo -e "${RED}Error:${NC} Could not extract project name from $pyproject" >&2
-    return 1
-  fi
-
-  # Detect default branch from git
-  DEFAULT_BRANCH="main"
-  if git -C "$project_dir" rev-parse --git-dir &>/dev/null; then
-    # Try HEAD reference first, then fall back to common names
-    local head_ref
-    head_ref=$(git -C "$project_dir" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||') || true
-    if [ -n "$head_ref" ]; then
-      DEFAULT_BRANCH="$head_ref"
-    elif git -C "$project_dir" rev-parse --verify refs/heads/master &>/dev/null; then
-      DEFAULT_BRANCH="master"
-    elif git -C "$project_dir" rev-parse --verify refs/heads/main &>/dev/null; then
-      DEFAULT_BRANCH="main"
-    else
-      # Fallback to current branch (handles repos without remotes)
-      local current_branch
-      current_branch=$(git -C "$project_dir" branch --show-current 2>/dev/null) || true
-      if [ -n "$current_branch" ]; then
-        DEFAULT_BRANCH="$current_branch"
-      fi
-    fi
-  fi
-}
-
-# ── Escape a string for use in sed replacement ────────────────
-sed_escape() {
-  printf '%s' "$1" | sed 's/[&|\\]/\\&/g'
-}
-
-# ── Apply substitutions to a template file (reads from stdin) ─
-apply_substitutions() {
-  local safe_display safe_name safe_pkg safe_upper safe_desc safe_date safe_branch
-  safe_display=$(sed_escape "$DISPLAY_NAME")
-  safe_name=$(sed_escape "$PROJECT_NAME")
-  safe_pkg=$(sed_escape "$PACKAGE_NAME")
-  safe_upper=$(sed_escape "$UPPER_PACKAGE_NAME")
-  safe_desc=$(sed_escape "$DESCRIPTION")
-  safe_branch=$(sed_escape "$DEFAULT_BRANCH")
-  safe_date=$(date +%Y-%m-%d)
-
-  sed \
-    -e "s|<!-- CUSTOMIZE: Project Name -->|$safe_display|g" \
-    -e "s|<!-- CUSTOMIZE: project-name -->|$safe_name|g" \
-    -e "s|<!-- CUSTOMIZE: package_name -->|$safe_pkg|g" \
-    -e "s|<!-- CUSTOMIZE: PACKAGE_NAME -->|$safe_upper|g" \
-    -e "s|<!-- CUSTOMIZE: description -->|$safe_desc|g" \
-    -e "s|<!-- CUSTOMIZE: default_branch -->|$safe_branch|g" \
-    -e "s|<!-- CUSTOMIZE: date -->|$safe_date|g" \
-    -e "s|# CUSTOMIZE:.*||g"
-}
-
 # ── Process a single managed file ─────────────────────────────
-process_file() {
-  local template_rel="$1"
+# Args: <source_abs_path> <dest_rel> <project_dir> <apply>
+process_managed_file() {
+  local source_path="$1"
   local dest_rel="$2"
   local project_dir="$3"
   local apply="$4"
 
-  local template_path="$TEMPLATES_DIR/$template_rel"
   local dest_path="$project_dir/$dest_rel"
 
-  if [ ! -f "$template_path" ]; then
-    echo -e "  ${RED}x${NC} $dest_rel — template not found: $template_rel"
+  if [ ! -f "$source_path" ]; then
+    echo -e "  ${RED}x${NC} $dest_rel — template not found: $source_path"
     return 1
   fi
 
-  # Generate processed content into a temp file (avoids variable truncation)
+  # Copy template to temp file and apply substitutions in-place
   local tmpfile
   tmpfile=$(mktemp)
   TMPFILES+=("$tmpfile")
-  apply_substitutions < "$template_path" > "$tmpfile"
+  cp "$source_path" "$tmpfile"
+  substitute_markers "$tmpfile"
 
-  # Check if destination exists and compare
+  # Compare with destination
   if [ -f "$dest_path" ]; then
     if cmp -s "$tmpfile" "$dest_path"; then
       echo -e "  ${DIM}-${NC} $dest_rel — already up to date"
@@ -231,17 +111,18 @@ ${BOLD}Usage:${NC}
   rdi-refresh <path> --apply             Apply managed file updates
   rdi-refresh <path> --apply --tasks     Apply + generate tasks.json for remaining gaps
 
+${BOLD}Stacks:${NC}
+  Auto-detected from manifest files (pyproject.toml, go.mod, Cargo.toml, package.json).
+  Managed and seeded file lists are resolved from the template chain.
+
 ${BOLD}Managed files${NC} (owned by rdi-dev-env, safe to overwrite):
-  .github/workflows/ci.yml              CI lint/test pipeline
-  .github/workflows/security.yml        Security scanning
-  .github/workflows/gemini-code-review.yml  AI code review
-  .github/workflows/stale.yml           Stale PR/issue cleanup
-  .github/dependabot.yml                Dependency updates
-  GEMINI.md                             Code review standards
+  CI workflows, security scanning, code review, dependabot config
+
+${BOLD}Seeded files${NC} (created once if missing, then project-owned):
+  CLAUDE.md, AGENTS.md, GEMINI.md, docs scaffolding
 
 ${BOLD}Not managed${NC} (project-owned, use rdi-audit to check):
-  Dockerfile, Makefile, conftest.py, config.py, pyproject.toml,
-  CLAUDE.md, AGENTS.md
+  Dockerfile, Makefile, conftest.py, config.py, pyproject.toml
 EOF
 }
 
@@ -292,14 +173,32 @@ main() {
     exit 1
   fi
 
-  # Extract project metadata
-  extract_metadata "$project_dir" || exit 1
+  # ── Auto-detect stack ──
+  detect_stack "$project_dir"
+  local detected="${DETECTED_STACK:-base}"
+  if [ "$detected" = "base" ] && [ -z "$DETECTED_STACK" ]; then
+    echo -e "${YELLOW}Warning:${NC} Could not detect stack (no manifest file found), falling back to base" >&2
+  fi
+
+  # ── Resolve template chain ──
+  if ! resolve_chain "$detected"; then
+    echo -e "${RED}Error:${NC} Failed to resolve template chain for '$detected'" >&2
+    exit 1
+  fi
+  local chain_display="${TEMPLATE_CHAIN[*]}"
+
+  # ── Extract project metadata (polymorphic) ──
+  extract_metadata "$project_dir"
+
+  # ── Collect file lists from template chain ──
+  collect_managed_files
+  collect_seeded_files
 
   local project_basename
   project_basename=$(basename "$project_dir")
 
   echo -e "${BOLD}rdi-refresh: ${CYAN}$project_basename${NC}"
-  echo -e "${DIM}Project: $PROJECT_NAME | Package: $PACKAGE_NAME | Branch: $DEFAULT_BRANCH${NC}"
+  echo -e "${DIM}Stack: $detected ($chain_display) | Project: ${META_PROJECT_NAME:-unknown} | Branch: ${META_DEFAULT_BRANCH:-main}${NC}"
   if $apply; then
     echo -e "${DIM}Mode: apply${NC}"
   else
@@ -312,38 +211,114 @@ main() {
   CREATED=0
   WOULD_UPDATE=0
   WOULD_CREATE=0
-
   local SEEDED_CREATED=0
   local SEEDED_WOULD_CREATE=0
 
+  # ── Process managed files ──
   echo -e "${BOLD}Managed Files${NC} ${DIM}(owned by rdi-dev-env — safe to overwrite)${NC}"
+
+  if [ ${#MANAGED_FILES[@]} -eq 0 ]; then
+    echo -e "  ${DIM}(no managed files in template chain)${NC}"
+  fi
+
   for entry in "${MANAGED_FILES[@]}"; do
-    local template_rel="${entry%%:*}"
-    local dest_rel="${entry##*:}"
-    process_file "$template_rel" "$dest_rel" "$project_dir" "$apply" || true
+    local stack="${entry%%:*}"
+    local dest_rel="${entry#*:}"
+
+    # Resolve the source template file.
+    # Try the declaring stack first, then walk chain backwards (most specific → base)
+    # to find the actual template source.
+    local source_path=""
+    source_path=$(resolve_workflow_source "$stack" "$dest_rel")
+    if [ -z "$source_path" ] || [ ! -f "$source_path" ]; then
+      # Walk chain in reverse to find the source
+      local j=${#TEMPLATE_CHAIN[@]}
+      while [ $j -gt 0 ]; do
+        ((j--)) || true
+        local try_stack="${TEMPLATE_CHAIN[$j]}"
+        source_path=$(resolve_workflow_source "$try_stack" "$dest_rel")
+        if [ -n "$source_path" ] && [ -f "$source_path" ]; then
+          break
+        fi
+        source_path=""
+      done
+    fi
+
+    if [ -z "$source_path" ]; then
+      echo -e "  ${RED}x${NC} $dest_rel — template source not found in any stack"
+      continue
+    fi
+
+    process_managed_file "$source_path" "$dest_rel" "$project_dir" "$apply" || true
   done
 
+  # ── Process seeded files ──
   echo ""
   echo -e "${BOLD}Seeded Files${NC} ${DIM}(created once, then project-owned)${NC}"
-  for entry in "${SEEDED_FILES[@]}"; do
-    local template_rel="${entry%%:*}"
-    local dest_rel="${entry##*:}"
+
+  if [ ${#SEEDED_MAP_KEYS[@]} -eq 0 ]; then
+    echo -e "  ${DIM}(no seeded files in template chain)${NC}"
+  fi
+
+  local seeded_len=${#SEEDED_MAP_KEYS[@]}
+  for ((i=0; i<seeded_len; i++)); do
+    local dest_rel="${SEEDED_MAP_KEYS[$i]}"
+    local stack="${SEEDED_MAP_VALUES[$i]}"
     local dest_path="$project_dir/$dest_rel"
 
     if [ -e "$dest_path" ]; then
       echo -e "  ${DIM}-${NC} $dest_rel — already exists (project-owned, skipping)"
-    elif $apply; then
-      local tmpfile
-      tmpfile=$(mktemp)
-      TMPFILES+=("$tmpfile")
-      apply_substitutions < "$TEMPLATES_DIR/$template_rel" > "$tmpfile"
-      mkdir -p "$(dirname "$dest_path")"
-      cat "$tmpfile" > "$dest_path" && rm -f "$tmpfile"
-      echo -e "  ${GREEN}+${NC} $dest_rel — created (customize <!-- CUSTOMIZE --> markers)"
-      ((SEEDED_CREATED++)) || true
+      continue
+    fi
+
+    # Find the seeded source file in the stack's template directory
+    local source_path="$TEMPLATES_DIR/$stack/$dest_rel"
+
+    # For skeleton-based files (CLAUDE.md, AGENTS.md, GEMINI.md), check for .skeleton
+    local skeleton_path="$TEMPLATES_DIR/$stack/skeletons/${dest_rel}.skeleton"
+    # Walk chain for skeleton — use the most specific layer that has one
+    local actual_skeleton=""
+    for s in "${TEMPLATE_CHAIN[@]}"; do
+      local sk="$TEMPLATES_DIR/$s/skeletons/${dest_rel}.skeleton"
+      if [ -f "$sk" ]; then
+        actual_skeleton="$sk"
+      fi
+    done
+
+    if [ -n "$actual_skeleton" ]; then
+      # Assemble from skeleton + fragments
+      if $apply; then
+        local tmpfile
+        tmpfile=$(mktemp)
+        TMPFILES+=("$tmpfile")
+        assemble_file "$actual_skeleton" "$tmpfile"
+        substitute_markers "$tmpfile"
+        mkdir -p "$(dirname "$dest_path")"
+        cat "$tmpfile" > "$dest_path" && rm -f "$tmpfile"
+        echo -e "  ${GREEN}+${NC} $dest_rel — created (assembled from skeleton + fragments)"
+        ((SEEDED_CREATED++)) || true
+      else
+        echo -e "  ${YELLOW}+${NC} $dest_rel — would create (assembled from skeleton + fragments)"
+        ((SEEDED_WOULD_CREATE++)) || true
+      fi
+    elif [ -f "$source_path" ]; then
+      # Direct copy from template
+      if $apply; then
+        local tmpfile
+        tmpfile=$(mktemp)
+        TMPFILES+=("$tmpfile")
+        cp "$source_path" "$tmpfile"
+        substitute_markers "$tmpfile"
+        mkdir -p "$(dirname "$dest_path")"
+        cat "$tmpfile" > "$dest_path" && rm -f "$tmpfile"
+        echo -e "  ${GREEN}+${NC} $dest_rel — created"
+        ((SEEDED_CREATED++)) || true
+      else
+        echo -e "  ${YELLOW}+${NC} $dest_rel — would create"
+        ((SEEDED_WOULD_CREATE++)) || true
+      fi
     else
-      echo -e "  ${YELLOW}+${NC} $dest_rel — would create"
-      ((SEEDED_WOULD_CREATE++)) || true
+      echo -e "  ${DIM}-${NC} $dest_rel — template source not found in $stack/ (skipping)"
     fi
   done
 
