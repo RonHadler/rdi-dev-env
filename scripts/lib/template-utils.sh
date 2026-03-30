@@ -63,7 +63,8 @@ json_extract_field() {
     return
   fi
   local line
-  line=$(grep -m1 "\"$field\"[[:space:]]*:" "$file" 2>/dev/null || echo "")
+  line=$(grep -m1 "\"$field\"[[:space:]]*:" "$file" 2>/dev/null) || true
+  line="${line//$'\r'/}"
   if [ -z "$line" ]; then
     echo ""
     return
@@ -100,7 +101,7 @@ for key in sys.argv[2].split('.'):
 if isinstance(obj, list):
     for item in obj:
         print(item)
-" "$file" "$path" 2>/dev/null || true
+" "$file" "$path" 2>/dev/null | tr -d '\r' || true
 }
 
 # Extract the detect rule from template.json as a parseable string.
@@ -108,7 +109,8 @@ if isinstance(obj, list):
 # Usage: json_extract_detect <template.json>
 json_extract_detect() {
   local file="$1"
-  $PYTHON_CMD -c "
+  local rule
+  if ! rule=$($PYTHON_CMD -c "
 import json, sys
 with open(sys.argv[1]) as f:
     data = json.load(f)
@@ -122,7 +124,11 @@ elif 'file_contains' in d:
     print('file_contains:' + fc['path'] + ':' + fc['pattern'])
 else:
     print('unknown')
-" "$file" 2>/dev/null || echo "unknown"
+" "$file" 2>/dev/null); then
+    echo "unknown"
+    return
+  fi
+  printf '%s' "${rule//$'\r'/}"
 }
 
 # ── Template Chain Resolution ────────────────────────────────
@@ -215,19 +221,44 @@ detect_stack() {
 
 # ── File Collection ──────────────────────────────────────────
 
-# Collect all managed files from the template chain.
+# Collect managed files from the template chain, deduplicated by dest path.
+# Later layers override earlier ones (e.g. python overrides base for same file).
 # Each entry is "stack_name:dest_path" so callers know which layer provides it.
 # Requires TEMPLATE_CHAIN to be set (call resolve_chain first).
-# Sets MANAGED_FILES array.
+# Sets MANAGED_FILES array (parallel arrays: MANAGED_MAP_KEYS / MANAGED_MAP_VALUES
+# used internally, final result in MANAGED_FILES as "stack:dest" strings).
 # Usage: collect_managed_files
 collect_managed_files() {
-  MANAGED_FILES=()
+  local _keys=()
+  local _values=()
+  local tjson found keys_len
+
   for stack in "${TEMPLATE_CHAIN[@]}"; do
-    local tjson="$TEMPLATES_DIR/$stack/template.json"
+    tjson="$TEMPLATES_DIR/$stack/template.json"
     while IFS= read -r entry; do
       [ -z "$entry" ] && continue
-      MANAGED_FILES+=("$stack:$entry")
+      # Dedup: later layers override earlier for same dest path
+      found=false
+      keys_len=${#_keys[@]}
+      for ((i=0; i<keys_len; i++)); do
+        if [ "${_keys[$i]}" = "$entry" ]; then
+          _values[$i]="$stack"
+          found=true
+          break
+        fi
+      done
+      if [ "$found" = false ]; then
+        _keys+=("$entry")
+        _values+=("$stack")
+      fi
     done < <(json_extract_array "$tjson" "files.managed")
+  done
+
+  # Build final MANAGED_FILES array
+  MANAGED_FILES=()
+  local len=${#_keys[@]}
+  for ((i=0; i<len; i++)); do
+    MANAGED_FILES+=("${_values[$i]}:${_keys[$i]}")
   done
 }
 
@@ -239,14 +270,15 @@ collect_managed_files() {
 collect_seeded_files() {
   SEEDED_MAP_KEYS=()
   SEEDED_MAP_VALUES=()
+  local tjson found keys_len
 
   for stack in "${TEMPLATE_CHAIN[@]}"; do
-    local tjson="$TEMPLATES_DIR/$stack/template.json"
+    tjson="$TEMPLATES_DIR/$stack/template.json"
     while IFS= read -r entry; do
       [ -z "$entry" ] && continue
       # Check if key already exists; if so, override its value
-      local found=false
-      local keys_len=${#SEEDED_MAP_KEYS[@]}
+      found=false
+      keys_len=${#SEEDED_MAP_KEYS[@]}
       for ((i=0; i<keys_len; i++)); do
         if [ "${SEEDED_MAP_KEYS[$i]}" = "$entry" ]; then
           SEEDED_MAP_VALUES[$i]="$stack"
@@ -393,7 +425,8 @@ extract_metadata() {
 
   # Derive display name from project name if not set
   if [ -z "$META_DISPLAY_NAME" ] && [ -n "$META_PROJECT_NAME" ]; then
-    META_DISPLAY_NAME=$($PYTHON_CMD -c "import sys; print(sys.argv[1].replace('-', ' ').title())" "$META_PROJECT_NAME")
+    META_DISPLAY_NAME=$($PYTHON_CMD -c "import sys; print(sys.argv[1].replace('-', ' ').title())" "$META_PROJECT_NAME" 2>/dev/null) || true
+    META_DISPLAY_NAME="${META_DISPLAY_NAME//$'\r'/}"
   fi
 }
 
@@ -414,6 +447,7 @@ desc = proj.get('description', '').replace(chr(31), ' ')
 pkg = name.replace('-', '_')
 print(chr(31).join([name, desc, pkg]))
 " "$dir/pyproject.toml" 2>/dev/null) || return 0
+  result="${result//$'\r'/}"
 
   local delim=$'\x1f'
   META_PROJECT_NAME=$(printf '%s' "$result" | cut -d "$delim" -f1)
