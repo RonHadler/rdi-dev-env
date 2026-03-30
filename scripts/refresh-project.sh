@@ -258,17 +258,16 @@ main() {
 
   # ── Process seeded files ──
   local dest_path actual_skeleton sk tmpfile
-  local seeded_len=${#SEEDED_MAP_KEYS[@]}
   echo ""
   echo -e "${BOLD}Seeded Files${NC} ${DIM}(created once, then project-owned)${NC}"
 
-  if [ ${#SEEDED_MAP_KEYS[@]} -eq 0 ]; then
+  if [ ${#SEEDED_FILES[@]} -eq 0 ]; then
     echo -e "  ${DIM}(no seeded files in template chain)${NC}"
   fi
 
-  for ((i=0; i<seeded_len; i++)); do
-    dest_rel="${SEEDED_MAP_KEYS[$i]}"
-    stack="${SEEDED_MAP_VALUES[$i]}"
+  for entry in "${SEEDED_FILES[@]}"; do
+    stack="${entry%%:*}"
+    dest_rel="${entry#*:}"
     dest_path="$project_dir/$dest_rel"
 
     if [ -e "$dest_path" ]; then
@@ -276,8 +275,11 @@ main() {
       continue
     fi
 
-    # Find the seeded source file in the stack's template directory
+    # Find the seeded source file — try exact name, then .template suffix
     source_path="$TEMPLATES_DIR/$stack/$dest_rel"
+    if [ ! -f "$source_path" ]; then
+      source_path="$TEMPLATES_DIR/$stack/${dest_rel}.template"
+    fi
 
     # Walk chain for skeleton — use the most specific layer that has one
     actual_skeleton=""

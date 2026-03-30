@@ -85,12 +85,27 @@ jobs:
 
           echo "count=$FOUND" >> "$GITHUB_OUTPUT"
 
-      # ── Tier 3: SAST Patterns ──
+      # ── Tier 3: SAST (gosec + pattern checks) ──
+      - name: Install gosec
+        run: go install github.com/securego/gosec/v2/cmd/gosec@latest
+
       - name: SAST pattern check
         id: sast
         run: |
           echo "## SAST Patterns" > sast-report.md
           FOUND=0
+
+          # gosec — covers SQL injection (G201/G202), hardcoded creds, and more
+          GOSEC_OUTPUT=$(gosec -no-fail -fmt text ./... 2>&1 || true)
+          GOSEC_COUNT=$(printf "%s\n" "$GOSEC_OUTPUT" | grep -c '^\[' || echo 0)
+
+          if [ "$GOSEC_COUNT" -gt 0 ]; then
+            FOUND=$((FOUND + GOSEC_COUNT))
+            echo "**gosec findings ($GOSEC_COUNT issues):**" >> sast-report.md
+            echo '```' >> sast-report.md
+            printf "%s\n" "$GOSEC_OUTPUT" | grep -A2 '^\[' | head -30 >> sast-report.md
+            echo '```' >> sast-report.md
+          fi
 
           # unsafe package usage
           UNSAFE=$(grep -rnE '\b"unsafe"\b' \
@@ -121,22 +136,6 @@ jobs:
             echo "**os/exec usage ($COUNT occurrences) — verify no user input:**" >> sast-report.md
             echo '```' >> sast-report.md
             printf "%s\n" "$EXEC" | head -5 >> sast-report.md
-            echo '```' >> sast-report.md
-          fi
-
-          # SQL string concatenation (potential injection)
-          SQLI=$(grep -rnE '(fmt\.Sprintf|"+.*\+).*([Ss][Ee][Ll][Ee][Cc][Tt]|[Ii][Nn][Ss][Ee][Rr][Tt]|[Uu][Pp][Dd][Aa][Tt][Ee]|[Dd][Ee][Ll][Ee][Tt][Ee])' \
-            --include='*.go' \
-            --exclude-dir=vendor --exclude-dir=.git --exclude-dir=testdata \
-            --exclude='*_test.go' \
-            . 2>/dev/null || true)
-
-          if [ -n "$SQLI" ]; then
-            COUNT=$(printf "%s\n" "$SQLI" | wc -l)
-            FOUND=$((FOUND + COUNT))
-            echo "**Potential SQL injection ($COUNT occurrences):**" >> sast-report.md
-            echo '```' >> sast-report.md
-            printf "%s\n" "$SQLI" | head -5 >> sast-report.md
             echo '```' >> sast-report.md
           fi
 

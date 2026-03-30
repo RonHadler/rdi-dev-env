@@ -283,7 +283,7 @@ main() {
 
   # ── Shared locals for scaffolding sections ──────────────────
   local tjson dir_entry dest_dir stack dest_rel source_path
-  local j try_stack seeded_len actual_skeleton sk
+  local j try_stack actual_skeleton sk
   local dest_key src_path source_file dest_file rel_path
 
   # ── A. Scaffold directories from template chain ────────────
@@ -347,10 +347,9 @@ main() {
   echo ""
   echo -e "${BOLD}Seeded Files${NC} ${DIM}(project-owned after creation)${NC}"
 
-  seeded_len=${#SEEDED_MAP_KEYS[@]}
-  for ((i=0; i<seeded_len; i++)); do
-    dest_rel="${SEEDED_MAP_KEYS[$i]}"
-    stack="${SEEDED_MAP_VALUES[$i]}"
+  for entry in "${SEEDED_FILES[@]}"; do
+    stack="${entry%%:*}"
+    dest_rel="${entry#*:}"
 
     # .gitignore handled separately by copy_gitignore
     [ "$dest_rel" = ".gitignore" ] && continue
