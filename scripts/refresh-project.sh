@@ -218,6 +218,7 @@ main() {
   local SEEDED_WOULD_CREATE=0
 
   # ── Process managed files ──
+  local stack dest_rel source_path j try_stack
   echo -e "${BOLD}Managed Files${NC} ${DIM}(owned by rdi-dev-env — safe to overwrite)${NC}"
 
   if [ ${#MANAGED_FILES[@]} -eq 0 ]; then
@@ -225,20 +226,20 @@ main() {
   fi
 
   for entry in "${MANAGED_FILES[@]}"; do
-    local stack="${entry%%:*}"
-    local dest_rel="${entry#*:}"
+    stack="${entry%%:*}"
+    dest_rel="${entry#*:}"
 
     # Resolve the source template file.
     # Try the declaring stack first, then walk chain backwards (most specific → base)
     # to find the actual template source.
-    local source_path=""
+    source_path=""
     source_path=$(resolve_workflow_source "$stack" "$dest_rel")
     if [ -z "$source_path" ] || [ ! -f "$source_path" ]; then
       # Walk chain in reverse to find the source
-      local j=${#TEMPLATE_CHAIN[@]}
+      j=${#TEMPLATE_CHAIN[@]}
       while [ $j -gt 0 ]; do
         ((j--)) || true
-        local try_stack="${TEMPLATE_CHAIN[$j]}"
+        try_stack="${TEMPLATE_CHAIN[$j]}"
         source_path=$(resolve_workflow_source "$try_stack" "$dest_rel")
         if [ -n "$source_path" ] && [ -f "$source_path" ]; then
           break
@@ -256,6 +257,8 @@ main() {
   done
 
   # ── Process seeded files ──
+  local dest_path actual_skeleton sk tmpfile
+  local seeded_len=${#SEEDED_MAP_KEYS[@]}
   echo ""
   echo -e "${BOLD}Seeded Files${NC} ${DIM}(created once, then project-owned)${NC}"
 
@@ -263,11 +266,10 @@ main() {
     echo -e "  ${DIM}(no seeded files in template chain)${NC}"
   fi
 
-  local seeded_len=${#SEEDED_MAP_KEYS[@]}
   for ((i=0; i<seeded_len; i++)); do
-    local dest_rel="${SEEDED_MAP_KEYS[$i]}"
-    local stack="${SEEDED_MAP_VALUES[$i]}"
-    local dest_path="$project_dir/$dest_rel"
+    dest_rel="${SEEDED_MAP_KEYS[$i]}"
+    stack="${SEEDED_MAP_VALUES[$i]}"
+    dest_path="$project_dir/$dest_rel"
 
     if [ -e "$dest_path" ]; then
       echo -e "  ${DIM}-${NC} $dest_rel — already exists (project-owned, skipping)"
@@ -275,12 +277,12 @@ main() {
     fi
 
     # Find the seeded source file in the stack's template directory
-    local source_path="$TEMPLATES_DIR/$stack/$dest_rel"
+    source_path="$TEMPLATES_DIR/$stack/$dest_rel"
 
     # Walk chain for skeleton — use the most specific layer that has one
-    local actual_skeleton=""
+    actual_skeleton=""
     for s in "${TEMPLATE_CHAIN[@]}"; do
-      local sk="$TEMPLATES_DIR/$s/skeletons/${dest_rel}.skeleton"
+      sk="$TEMPLATES_DIR/$s/skeletons/${dest_rel}.skeleton"
       if [ -f "$sk" ]; then
         actual_skeleton="$sk"
       fi
@@ -289,7 +291,6 @@ main() {
     if [ -n "$actual_skeleton" ]; then
       # Assemble from skeleton + fragments
       if $apply; then
-        local tmpfile
         tmpfile=$(mktemp)
         TMPFILES+=("$tmpfile")
         assemble_file "$actual_skeleton" "$tmpfile"
@@ -305,7 +306,6 @@ main() {
     elif [ -f "$source_path" ]; then
       # Direct copy from template
       if $apply; then
-        local tmpfile
         tmpfile=$(mktemp)
         TMPFILES+=("$tmpfile")
         cp "$source_path" "$tmpfile"
