@@ -63,7 +63,8 @@ json_extract_field() {
     return
   fi
   local line
-  line=$(grep -m1 "\"$field\"[[:space:]]*:" "$file" 2>/dev/null | tr -d '\r' || echo "")
+  line=$(grep -m1 "\"$field\"[[:space:]]*:" "$file" 2>/dev/null) || true
+  line="${line//$'\r'/}"
   if [ -z "$line" ]; then
     echo ""
     return
@@ -108,7 +109,8 @@ if isinstance(obj, list):
 # Usage: json_extract_detect <template.json>
 json_extract_detect() {
   local file="$1"
-  $PYTHON_CMD -c "
+  local rule
+  if ! rule=$($PYTHON_CMD -c "
 import json, sys
 with open(sys.argv[1]) as f:
     data = json.load(f)
@@ -122,7 +124,11 @@ elif 'file_contains' in d:
     print('file_contains:' + fc['path'] + ':' + fc['pattern'])
 else:
     print('unknown')
-" "$file" 2>/dev/null | tr -d '\r' || echo "unknown"
+" "$file" 2>/dev/null); then
+    echo "unknown"
+    return
+  fi
+  printf '%s' "${rule//$'\r'/}"
 }
 
 # ── Template Chain Resolution ────────────────────────────────
@@ -417,7 +423,8 @@ extract_metadata() {
 
   # Derive display name from project name if not set
   if [ -z "$META_DISPLAY_NAME" ] && [ -n "$META_PROJECT_NAME" ]; then
-    META_DISPLAY_NAME=$($PYTHON_CMD -c "import sys; print(sys.argv[1].replace('-', ' ').title())" "$META_PROJECT_NAME" | tr -d '\r')
+    META_DISPLAY_NAME=$($PYTHON_CMD -c "import sys; print(sys.argv[1].replace('-', ' ').title())" "$META_PROJECT_NAME" 2>/dev/null) || true
+    META_DISPLAY_NAME="${META_DISPLAY_NAME//$'\r'/}"
   fi
 }
 
@@ -437,7 +444,8 @@ name = proj.get('name', '')
 desc = proj.get('description', '').replace(chr(31), ' ')
 pkg = name.replace('-', '_')
 print(chr(31).join([name, desc, pkg]))
-" "$dir/pyproject.toml" 2>/dev/null | tr -d '\r') || return 0
+" "$dir/pyproject.toml" 2>/dev/null) || return 0
+  result="${result//$'\r'/}"
 
   local delim=$'\x1f'
   META_PROJECT_NAME=$(printf '%s' "$result" | cut -d "$delim" -f1)

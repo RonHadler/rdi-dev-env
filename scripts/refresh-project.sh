@@ -189,6 +189,9 @@ main() {
 
   # ── Extract project metadata (polymorphic) ──
   extract_metadata "$project_dir"
+  if [ -z "$META_PROJECT_NAME" ]; then
+    echo -e "${YELLOW}Warning:${NC} Could not extract project name from manifest — substitutions may be incomplete" >&2
+  fi
 
   # ── Collect file lists from template chain ──
   collect_managed_files
@@ -274,8 +277,6 @@ main() {
     # Find the seeded source file in the stack's template directory
     local source_path="$TEMPLATES_DIR/$stack/$dest_rel"
 
-    # For skeleton-based files (CLAUDE.md, AGENTS.md, GEMINI.md), check for .skeleton
-    local skeleton_path="$TEMPLATES_DIR/$stack/skeletons/${dest_rel}.skeleton"
     # Walk chain for skeleton — use the most specific layer that has one
     local actual_skeleton=""
     for s in "${TEMPLATE_CHAIN[@]}"; do
