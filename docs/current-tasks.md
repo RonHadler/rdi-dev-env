@@ -7,7 +7,6 @@ Phase 1 complete. Phase 2 next (high-risk production: rdi-google-ads-mcp, rdi-go
 - None
 
 ## Up Next — Script Updates
-- [ ] Update `new-project.sh`: resolve_chain(), assemble_file(), stack menu, lockfile generation (`npm install` / `uv sync` before initial commit)
 - [ ] Standardize `.template` suffix on `pyproject.toml` (align with Cargo.toml.template, package.json.template, go.mod.template)
 - [ ] Configure Python dependabot to use `uv` ecosystem (or add `uv lock` step for Dependabot PRs)
 - [ ] Replace Go SQL injection hand-rolled regex with `gosec` in security-go.yml
@@ -31,6 +30,7 @@ Phase 1 complete. Phase 2 next (high-risk production: rdi-google-ads-mcp, rdi-go
 - [x] Update `standards.json` to v2 (multi-stack scoping with compat_aliases)
 - [x] Update `audit-project.sh`: auto-detect stack from manifest files, multi-stack check collection
 - [x] Update `refresh-project.sh`: manifest-driven managed file lists, polymorphic metadata extraction
+- [x] Update `new-project.sh`: resolve_chain(), assemble_file(), stack menu, lockfile generation
 
 ## Blocked
 - None
