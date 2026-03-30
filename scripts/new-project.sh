@@ -154,7 +154,7 @@ build_stack_menu() {
     [ "$name" = "base" ] && continue
     layer=$(json_extract_field "$tjson" "layer")
     desc=$(json_extract_field "$tjson" "description")
-    entries+=("${layer:-0}	$name	$desc")
+    entries+=("${layer:-0}"$'\t'"$name"$'\t'"$desc")
   done
 
   local sorted
@@ -211,14 +211,17 @@ main() {
   echo -e "${DIM}Chain: ${TEMPLATE_CHAIN[*]}${NC}"
   echo ""
 
-  # ── Set META_* globals from user input ─────────────────────
+  # ── Set META_* locals (inherited by called functions) ───────
   # shellcheck disable=SC2034  # META_* consumed by substitute_markers() in template-utils.sh
-  META_PROJECT_NAME="$project_name"
+  local META_PROJECT_NAME="$project_name"
+  local META_PACKAGE_NAME
   META_PACKAGE_NAME=$(echo "$project_name" | sed 's/[- ]/_/g')
+  local META_DISPLAY_NAME
   META_DISPLAY_NAME=$($PYTHON_CMD -c "import sys; print(sys.argv[1].replace('-', ' ').title())" "$project_name" 2>/dev/null) || true
   META_DISPLAY_NAME="${META_DISPLAY_NAME//$'\r'/}"
   # shellcheck disable=SC2034  # Consumed by substitute_markers()
-  META_DEFAULT_BRANCH="develop"
+  local META_DEFAULT_BRANCH="develop"
+  local META_DESCRIPTION
 
   # ── 3. Description ─────────────────────────────────────────
   META_DESCRIPTION=$(prompt_text "Brief project description" "")
@@ -233,8 +236,7 @@ main() {
   echo ""
 
   # ── 5. GCP Project ────────────────────────────────────────
-  GCP_PROJECT_ID=""
-  GCP_REGION="us-central1"
+  local GCP_PROJECT_ID="" GCP_REGION="us-central1"
   local gcp_input
   gcp_input=$(prompt_text "GCP project ID (or 'skip')" "skip")
   if [ "$gcp_input" != "skip" ]; then
